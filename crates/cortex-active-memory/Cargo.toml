@@ -1,0 +1,21 @@
+[package]
+name = "cortex-active-memory"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Curated working set built from dominant eigenmodes (v4 active memory layer)"
+
+[dependencies]
+cortex-core.workspace = true
+cortex-spectral.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

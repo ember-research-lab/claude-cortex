@@ -1,0 +1,21 @@
+[package]
+name = "cortex-monitor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Self-spectral metrics — cortex observing its own learning-graph spectrum (v4)"
+
+[dependencies]
+cortex-core.workspace = true
+cortex-spectral.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
