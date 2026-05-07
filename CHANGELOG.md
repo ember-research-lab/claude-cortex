@@ -4,6 +4,17 @@ All notable changes to claude-cortex are documented here. Format follows [Keep a
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-05-07
+
+Patch driven by self-introspection during the first real session of v0.3.0.
+
+### Fixed
+- **Skills now load.** All four cortex skills (`cortex-orientation`, `ledger-knowledge`, `learning-capture`, `handoff-management`) had `allowed-tools:` in their YAML frontmatter, which is a non-standard field that fails silent validation in Claude Code's plugin loader. Working SKILL.md files use only `name`, `description`, `version`, `license`. Removed `allowed-tools` and added `version: 0.3.1`. Without this fix, none of cortex's skills surfaced as available — most importantly, `cortex-orientation` (which is supposed to auto-load every session and establish orchestrator-identity directives) was completely dark.
+- **`post_tool_use` hook no longer over-fires.** v0.3.0 used a denylist of routine tools (Read/Glob/Grep/Task*) and fired on everything else, which meant Bash, Write, Edit, ToolSearch, and even cortex's own MCP tools all triggered a discovery-tagging directive. Worse, calling `tag_learning` itself fired the hook, which prompted a tag for the tag, recursing on its own output. Inverted to an *allowlist*: now fires only on `WebFetch`, `WebSearch`, and external MCP tools. Cortex's own MCP tools are explicitly excluded to prevent the recursion.
+
+### Migration
+No data migration needed — these are config-and-prompt-only changes. Pull the new release; `/plugin marketplace update ember-research-lab` and `/reload-plugins`.
+
 ## [0.3.0] — 2026-05-06
 
 Major-version refactor: Python → Rust workspace, `aaronb305/claude-cortex` → `ember-research-lab/claude-cortex`, adopting the v3 spec's design principles (orchestrator identity, situation modeling, producer/verifier separation, substrate inviolability).

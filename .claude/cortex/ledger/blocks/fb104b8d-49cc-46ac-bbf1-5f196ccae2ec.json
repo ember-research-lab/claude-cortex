@@ -1,0 +1,21 @@
+{
+  "id": "fb104b8d-49cc-46ac-bbf1-5f196ccae2ec",
+  "timestamp": "2026-05-07T17:18:59.280753Z",
+  "session_id": "mcp-session",
+  "parent_block": "6972e06a-bc0a-4bb6-8d9c-be94eb0b8d54",
+  "learnings": [
+    {
+      "id": "b4d1370e-fbde-43c2-8e26-9b594534d1ec",
+      "category": "discovery",
+      "content": "Claude Code marketplace.json plugin entries use source.source as the discriminator, not source.type. Valid source types: 'url' (universal, 91/180 official entries), 'git-subdir' (34), 'github' (5, newer CC versions only), './...' string shorthand (50). Use 'url' for max compatibility.",
+      "content_hash": "4bb967f6880b4b1a",
+      "confidence": 0.95,
+      "privacy": "public",
+      "source": "mcp_tag",
+      "created_at": "2026-05-07T17:18:59.276735Z",
+      "learning_source": "session",
+      "co_authors": []
+    }
+  ],
+  "hash": "03fdcf590749f1decc109a75be423a5b8a49fd02eb9cbfaf8a917367c4525e62"
+}

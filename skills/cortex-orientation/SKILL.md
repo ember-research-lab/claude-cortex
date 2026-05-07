@@ -1,7 +1,7 @@
 ---
 name: cortex-orientation
 description: Default operating mode for cortex-equipped sessions. Auto-loads on every session start. Establishes orchestrator identity, situation modeling, listening protocol, producer/verifier separation, and substrate inviolability.
-allowed-tools: "*"
+version: 0.3.1
 ---
 
 # Cortex Orientation
