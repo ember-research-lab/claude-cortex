@@ -1,0 +1,11 @@
+{
+  "type": "learning",
+  "content_hash": "18ca1b34a3d2f510",
+  "category": "pattern",
+  "content": "Claude Code plugin install fetches markdown (agents/skills/hooks/plugin.json) from the source repo but does NOT install binaries referenced in MCP/hook commands. For Rust plugins, users must separately install binaries to PATH via cargo install --path or by downloading release tarballs. Document this in the plugin README.",
+  "confidence": 0.9,
+  "source": "mcp_tag",
+  "first_seen": "2026-05-07T17:19:06.118301Z",
+  "project_context": null,
+  "stored_at": "2026-05-07T17:19:06.127628Z"
+}

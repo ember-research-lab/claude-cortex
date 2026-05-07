@@ -1,0 +1,21 @@
+{
+  "id": "d40f2130-5d40-402f-9e51-ef123c7434f0",
+  "timestamp": "2026-05-07T17:19:08.715704Z",
+  "session_id": "mcp-session",
+  "parent_block": "1f370311-08e0-4d5a-a53d-d91c57daabad",
+  "learnings": [
+    {
+      "id": "18d6e907-4dfa-497c-a5dc-93905bc1af2e",
+      "category": "decision",
+      "content": "When validating Claude Code plugin schema, always cross-check against ~/.claude/plugins/marketplaces/claude-plugins-official/.claude-plugin/marketplace.json (the actual loaded official marketplace) before trusting validator-agent suggestions. The plugin-validator agent's schema knowledge can be stale or wrong.",
+      "content_hash": "8118d08ab7e75c88",
+      "confidence": 0.9,
+      "privacy": "public",
+      "source": "mcp_tag",
+      "created_at": "2026-05-07T17:19:08.715667Z",
+      "learning_source": "session",
+      "co_authors": []
+    }
+  ],
+  "hash": "84f72adf968624f395aafe7e539de6accb9d11ee08729351637fefd5632f418f"
+}

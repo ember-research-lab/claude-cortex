@@ -1,0 +1,11 @@
+{
+  "type": "learning",
+  "content_hash": "291bc5cfa863d52c",
+  "category": "error",
+  "content": "Claude Code marketplace.json plugin entries should NOT include a top-level version field — none of the 180 official Anthropic-listed plugins use it. Version comes from the source repo's plugin.json. Including it triggers a plugin-loader version mismatch.",
+  "confidence": 0.85,
+  "source": "mcp_tag",
+  "first_seen": "2026-05-07T17:19:02.827974Z",
+  "project_context": null,
+  "stored_at": "2026-05-07T17:19:02.828653Z"
+}

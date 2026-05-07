@@ -1,6 +1,6 @@
 {
   "name": "claude-cortex",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Persistent memory that makes Claude Code smarter across sessions",
   "author": {
     "name": "Claude Cortex Contributors"

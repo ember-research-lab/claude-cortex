@@ -1,7 +1,7 @@
 ---
 name: ledger-knowledge
 description: Query the cortex knowledge ledger for prior learnings, patterns, and decisions. Use the MCP tools first; CLI is a fallback. Triggers on "list learnings", "show learning", "check the ledger", "what do we know about", "search learnings", "find in ledger", "search for pattern", "what's stored", "lookup", "fetch from ledger", "ledger stats", "how many learnings".
-allowed-tools: mcp__cortex__search_learnings, mcp__cortex__get_learning, mcp__cortex__list_learnings, mcp__cortex__ledger_stats, Bash, Read
+version: 0.3.1
 ---
 
 # Ledger Knowledge
