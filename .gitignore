@@ -10,3 +10,4 @@ Cargo.lock.bak
 # Never commit private keys or runtime flock sentinels
 **/.private_key
 **/.*.json.lock
+.claude/
