@@ -274,7 +274,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-core"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "base64",
@@ -308,7 +308,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-hooks"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -320,7 +320,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-mcp"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -337,7 +337,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-migrate"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "chrono",

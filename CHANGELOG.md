@@ -4,6 +4,14 @@ All notable changes to claude-cortex are documented here. Format follows [Keep a
 
 ## [Unreleased]
 
+## [0.3.4] — 2026-05-07
+
+Two introspection-found bugs from real plugin usage. Skills now actually load (the v0.3.1 fix was necessary but not sufficient — `allowed-tools` was the wrong field, but the explicit `skills` array itself is also a problem). SessionEnd hook stops failing schema validation.
+
+### Fixed
+- **Skills array dropped from plugin.json — relies on auto-discovery from `skills/`.** Surveyed 20+ official plugins in `~/.claude/plugins/cache/claude-plugins-official/`: every working one omits the `skills` field entirely (or sets it null) and lets Claude Code's plugin loader auto-discover from the `skills/` directory. The only plugins with an explicit `skills` array were both my cortex installs — and neither's skills loaded. Asymmetry: the `agents` array DOES work explicitly (cortex's 10 agents loaded fine in v0.3.3); skills doesn't. Undocumented but consistent across the marketplace. cortex-orientation should finally appear in the available-skills list after this patch.
+- **SessionEnd hook output schema fixed.** v0.3.3 emitted `{"hookSpecificOutput": {"hookEventName": "SessionEnd", "additionalContext": "..."}}`, which Claude Code rejects with "Hook JSON output validation failed — Invalid input." The schema only accepts `additionalContext` for UserPromptSubmit / PostToolUse / PostToolBatch — SessionEnd is strict and tolerates only top-level fields (continue / suppressOutput / stopReason / decision / reason / systemMessage / permissionDecision). Switched cortex-session-end to print the directive to **stderr** with empty stdout. Stderr is shown to the user as a session-end notice, bypasses JSON validation entirely, and matches v2 cortex's pattern. The directive is now framed as user-visible reminder rather than agent-side context (it has no agent to influence — the session is ending).
+
 ## [0.3.3] — 2026-05-07
 
 CI matrix cleanup so release artifacts actually publish.

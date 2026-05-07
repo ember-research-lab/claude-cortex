@@ -1,6 +1,6 @@
 {
   "name": "claude-cortex",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Persistent memory that makes Claude Code smarter across sessions",
   "author": {
     "name": "Claude Cortex Contributors"
@@ -20,12 +20,6 @@
     "./agents/task-decomposer.md",
     "./agents/test-writer.md",
     "./agents/verifier.md"
-  ],
-  "skills": [
-    "./skills/cortex-orientation/SKILL.md",
-    "./skills/handoff-management/SKILL.md",
-    "./skills/ledger-knowledge/SKILL.md",
-    "./skills/learning-capture/SKILL.md"
   ],
   "mcpServers": {
     "cortex": {
