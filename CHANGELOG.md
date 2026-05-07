@@ -4,6 +4,13 @@ All notable changes to claude-cortex are documented here. Format follows [Keep a
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-05-07
+
+Cross-platform fix-up of the v0.3.1 patch. The v0.3.1 tag exists but its CI run failed on Windows; v0.3.2 is the green release. No source-level changes from v0.3.1 beyond what's listed here.
+
+### Fixed
+- **File locking on Windows**: `fs2`'s `try_lock_exclusive` uses `LockFileEx` on Windows, which is mandatory byte-range locking. Locking the data file directly (e.g. `index.json`) blocked subsequent reads of the same file from the same process — `cargo test` failed on `windows-latest` with "The process cannot access the file because another process has locked a portion of the file." POSIX flock is advisory so this worked fine on linux/macOS. Fix: lock a sibling sentinel `.<filename>.lock` instead of the data file. Same pattern v2 cortex used.
+
 ## [0.3.1] — 2026-05-07
 
 Patch driven by self-introspection during the first real session of v0.3.0.

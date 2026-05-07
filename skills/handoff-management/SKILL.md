@@ -1,7 +1,7 @@
 ---
 name: handoff-management
 description: Save and load work-in-progress state for session continuity. Distinct from learnings (permanent knowledge); handoffs are ephemeral session state. Triggers on "save progress", "create handoff", "show handoff", "what was I working on", "handoff", "session handoff", "resume work", "where did we leave off", "pick up where I left off".
-version: 0.3.1
+version: 0.3.2
 ---
 
 # Handoff Management
