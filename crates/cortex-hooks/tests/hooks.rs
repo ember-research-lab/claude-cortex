@@ -20,7 +20,7 @@ fn binary(name: &str) -> std::path::PathBuf {
         .join(name)
 }
 
-fn run_hook(name: &str, env: &[(&str, &Path)], stdin: &str) -> Value {
+fn run_hook_raw(name: &str, env: &[(&str, &Path)], stdin: &str) -> (String, String) {
     let binary = binary(name);
     let mut cmd = Command::new(&binary);
     cmd.stdin(Stdio::piped())
@@ -37,13 +37,18 @@ fn run_hook(name: &str, env: &[(&str, &Path)], stdin: &str) -> Value {
         stdin_pipe.write_all(stdin.as_bytes()).unwrap();
     }
     let output = child.wait_with_output().unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
         output.status.success(),
-        "{name} exited {:?}: {}",
-        output.status,
-        String::from_utf8_lossy(&output.stderr)
+        "{name} exited {:?}: {stderr}",
+        output.status
     );
-    let stdout = String::from_utf8(output.stdout).unwrap();
+    (stdout, stderr)
+}
+
+fn run_hook(name: &str, env: &[(&str, &Path)], stdin: &str) -> Value {
+    let (stdout, _) = run_hook_raw(name, env, stdin);
     if stdout.trim().is_empty() {
         return serde_json::json!({});
     }
@@ -119,7 +124,7 @@ fn session_start_without_ledger_emits_nothing() {
 }
 
 #[test]
-fn session_end_emits_extraction_directive() {
+fn session_end_emits_directive_to_stderr_with_empty_stdout() {
     let project = TempDir::new().unwrap();
     let home = TempDir::new().unwrap();
     let stdin = serde_json::json!({
@@ -128,14 +133,14 @@ fn session_end_emits_extraction_directive() {
         "transcript_path": "/tmp/fake.jsonl",
     })
     .to_string();
-    let out = run_hook("cortex-session-end", &[("HOME", home.path())], &stdin);
-    let context = out["hookSpecificOutput"]["additionalContext"]
-        .as_str()
-        .unwrap();
-    assert!(context.contains("Session-End Extraction Directive"));
-    assert!(context.contains("abc-123"));
-    assert!(context.contains("Liberal extraction"));
-    assert!(context.contains("outcome-recorder"));
+    let (stdout, stderr) = run_hook_raw("cortex-session-end", &[("HOME", home.path())], &stdin);
+    // SessionEnd output schema is strict (no hookSpecificOutput.additionalContext);
+    // we print the directive to stderr and leave stdout empty.
+    assert_eq!(stdout.trim(), "", "stdout should be empty for SessionEnd");
+    assert!(stderr.contains("cortex session-end"));
+    assert!(stderr.contains("abc-123"));
+    assert!(stderr.contains("tag_learning"));
+    assert!(stderr.contains("record_outcome"));
 }
 
 #[test]

@@ -1,17 +1,24 @@
 //! `cortex-session-end` — fired when a Claude Code session ends.
 //!
-//! Per v3 spec the hook itself does not parse the transcript; instead it
-//! emits a directive instructing the orchestrator to extract any learnings
-//! that might be useful and to invoke the outcome-recorder agent on
-//! learnings referenced during the session. The directive is liberal on
-//! purpose — under-extraction has proven to be the bigger failure mode.
+//! v3.0.4: changed output mechanism. The hook output schema only allows
+//! `hookSpecificOutput.additionalContext` for UserPromptSubmit / PostToolUse /
+//! PostToolBatch — using it for SessionEnd fails strict schema validation
+//! (the v0.3.3 binary tripped exactly that on real session exits).
+//!
+//! Cortex's SessionEnd directive is meant for the *user* (a reminder to
+//! extract pending learnings + record outcomes) — it has no meaningful
+//! agent-side effect because the agent is going away. So we print to
+//! stderr instead of stdout. Stderr is shown to the user as a session-end
+//! notice and bypasses JSON validation entirely. Stdout is left empty.
 
-use cortex_hooks::{read_input, write_output};
+use cortex_hooks::read_input;
 
 fn main() {
     let input = read_input();
-    let context = build_directive(&input);
-    write_output("SessionEnd", context);
+    let directive = build_directive(&input);
+    if !directive.is_empty() {
+        eprintln!("{directive}");
+    }
 }
 
 fn build_directive(input: &cortex_hooks::HookInput) -> String {
@@ -20,33 +27,25 @@ fn build_directive(input: &cortex_hooks::HookInput) -> String {
         .clone()
         .unwrap_or_else(|| "unknown-session".to_string());
     let lines: Vec<String> = vec![
-        "# Session-End Extraction Directive".to_string(),
         String::new(),
+        "─── cortex session-end ───".to_string(),
         format!(
             "Session: {} (transcript: {})",
             session,
             input.transcript_path.as_deref().unwrap_or("<none>")
         ),
         String::new(),
-        "Liberal extraction: scan this conversation for any learning that \
-         might be useful in a future session. Cast a wide net — \
-         under-extraction has been the bigger failure mode. Tag each as \
-         discovery / decision / error / pattern, set initial confidence in \
-         [0.5, 0.8] depending on how directly it was demonstrated, and \
-         persist via `tag_learning`."
+        "If this session produced learnings worth keeping (discovery / decision \
+         / error / pattern), persist them via `tag_learning` before closing. \
+         For learnings looked up + applied during the session, call \
+         `record_outcome` (success / partial / failure) so confidence \
+         converges to reality."
             .to_string(),
         String::new(),
-        "For learnings referenced during the session (i.e., looked up via \
-         `search_learnings` / `get_learning` and applied), invoke the \
-         outcome-recorder agent (or call `record_outcome` directly) so \
-         confidence updates reflect what actually happened. Success / \
-         partial / failure as appropriate; include a one-line context \
-         describing how the learning was exercised."
+        "Skip if the session was purely conversational with no actionable \
+         artifacts or tool calls."
             .to_string(),
-        String::new(),
-        "Skip this step only if the session was purely conversational with \
-         no actionable artifacts or tool calls."
-            .to_string(),
+        "──────────────────────────".to_string(),
     ];
     lines.join("\n")
 }
