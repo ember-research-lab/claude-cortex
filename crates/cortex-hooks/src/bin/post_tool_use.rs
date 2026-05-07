@@ -77,8 +77,18 @@ mod tests {
     #[test]
     fn routine_tools_are_silent() {
         for t in [
-            "Read", "Write", "Edit", "MultiEdit", "Bash", "Glob", "Grep",
-            "TodoWrite", "TaskCreate", "TaskUpdate", "ToolSearch", "NotebookEdit",
+            "Read",
+            "Write",
+            "Edit",
+            "MultiEdit",
+            "Bash",
+            "Glob",
+            "Grep",
+            "TodoWrite",
+            "TaskCreate",
+            "TaskUpdate",
+            "ToolSearch",
+            "NotebookEdit",
         ] {
             assert!(!worth_nudging(t), "expected silence on {t}");
         }
@@ -93,7 +103,11 @@ mod tests {
     #[test]
     fn external_mcp_fires_but_cortex_mcp_does_not() {
         assert!(worth_nudging("mcp__some_external__do_thing"));
-        assert!(!worth_nudging("mcp__plugin_claude-cortex_cortex__tag_learning"));
-        assert!(!worth_nudging("mcp__plugin_claude-cortex_cortex__search_learnings"));
+        assert!(!worth_nudging(
+            "mcp__plugin_claude-cortex_cortex__tag_learning"
+        ));
+        assert!(!worth_nudging(
+            "mcp__plugin_claude-cortex_cortex__search_learnings"
+        ));
     }
 }
