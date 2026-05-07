@@ -1,0 +1,31 @@
+[package]
+name = "cortex-hooks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Claude Code hook subprocess binaries: session_start, post_tool_use, session_end"
+
+[[bin]]
+name = "cortex-session-start"
+path = "src/bin/session_start.rs"
+
+[[bin]]
+name = "cortex-post-tool-use"
+path = "src/bin/post_tool_use.rs"
+
+[[bin]]
+name = "cortex-session-end"
+path = "src/bin/session_end.rs"
+
+[dependencies]
+cortex-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

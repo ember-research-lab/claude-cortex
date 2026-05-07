@@ -1,0 +1,35 @@
+{
+  "description": "claude-cortex Rust hooks: orient on session start, discovery-tag after substantive tool calls, extract outcomes on session end. Binaries (cortex-session-start, cortex-post-tool-use, cortex-session-end) must be on PATH — install via the release artifact or `cargo install --path crates/cortex-hooks --bins`.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cortex-session-start"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cortex-post-tool-use"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cortex-session-end"
+          }
+        ]
+      }
+    ]
+  }
+}

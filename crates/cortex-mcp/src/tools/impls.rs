@@ -1,0 +1,526 @@
+//! Tool implementations. Each tool returns a JSON string. v2 returned `dict`
+//! from Python; the rmcp Rust handler returns a `String` so we serialize the
+//! response value into JSON ourselves to keep the wire format identical.
+
+use std::path::PathBuf;
+
+use anyhow::anyhow;
+use chrono::Utc;
+use cortex_core::confidence::decay_confidence;
+use cortex_core::models::{
+    Block, Learning, LearningCategory, OutcomeResult, Reinforcement, Reinforcements,
+};
+use cortex_core::Ledger;
+use rmcp::ErrorData;
+use serde_json::{json, Map, Value};
+
+use super::args::*;
+use crate::paths::{global_ledger_path, project_ledger_path};
+use crate::server::CortexServer;
+
+/// Convert an `anyhow::Result<Value>` into the rmcp tool string return type.
+/// On success, serializes the value to a single-line JSON string. Application
+/// errors (missing learnings, bad inputs) are reported as JSON `{"error": ...}`
+/// payloads so the agent receives the same shape as the v2 Python tools.
+pub async fn run(
+    future: impl std::future::Future<Output = anyhow::Result<Value>>,
+) -> Result<String, ErrorData> {
+    let value = match future.await {
+        Ok(v) => v,
+        Err(e) => json!({ "error": e.to_string() }),
+    };
+    serde_json::to_string(&value)
+        .map_err(|e| ErrorData::internal_error(format!("serialize tool result: {e}"), None))
+}
+
+fn resolve_ledger(
+    server: &CortexServer,
+    project_dir: Option<&str>,
+) -> anyhow::Result<Option<PathBuf>> {
+    if let Some(p) = project_dir {
+        return Ok(Some(project_ledger_path(Some(std::path::Path::new(p)))?));
+    }
+    if let Some(default) = &server.default_project_dir {
+        return Ok(Some(project_ledger_path(Some(default.as_path()))?));
+    }
+    Ok(global_ledger_path())
+}
+
+fn open_ledger(path: &std::path::Path) -> anyhow::Result<Option<Ledger>> {
+    if !path.is_dir() {
+        return Ok(None);
+    }
+    Ok(Some(Ledger::open(path)?))
+}
+
+fn parse_category(s: &str) -> anyhow::Result<LearningCategory> {
+    match s.to_ascii_lowercase().as_str() {
+        "discovery" => Ok(LearningCategory::Discovery),
+        "decision" => Ok(LearningCategory::Decision),
+        "error" => Ok(LearningCategory::Error),
+        "pattern" => Ok(LearningCategory::Pattern),
+        other => Err(anyhow!(
+            "Category must be one of: discovery, decision, error, pattern (got {other})"
+        )),
+    }
+}
+
+fn category_value(c: LearningCategory) -> &'static str {
+    match c {
+        LearningCategory::Discovery => "discovery",
+        LearningCategory::Decision => "decision",
+        LearningCategory::Error => "error",
+        LearningCategory::Pattern => "pattern",
+    }
+}
+
+fn parse_outcome_result(s: &str) -> anyhow::Result<OutcomeResult> {
+    match s.to_ascii_lowercase().as_str() {
+        "success" => Ok(OutcomeResult::Success),
+        "partial" => Ok(OutcomeResult::Partial),
+        "failure" => Ok(OutcomeResult::Failure),
+        other => Err(anyhow!(
+            "Result must be one of: success, partial, failure (got {other})"
+        )),
+    }
+}
+
+fn round2(f: f64) -> f64 {
+    (f * 100.0).round() / 100.0
+}
+
+fn effective_confidence(reinforcement: &Reinforcement) -> f64 {
+    decay_confidence(
+        reinforcement.confidence,
+        reinforcement.last_applied.into_inner(),
+        Utc::now(),
+    )
+}
+
+fn shortid(id: &str) -> String {
+    id.chars().take(8).collect()
+}
+
+fn match_prefix<'a>(
+    reinforcements: &'a Reinforcements,
+    learning_id: &str,
+) -> Option<(&'a String, &'a Reinforcement)> {
+    if let Some(r) = reinforcements.learnings.get(learning_id) {
+        return reinforcements
+            .learnings
+            .get_key_value(learning_id)
+            .map(|(k, _)| (k, r));
+    }
+    let mut iter = reinforcements
+        .learnings
+        .iter()
+        .filter(|(id, _)| id.starts_with(learning_id));
+    let first = iter.next()?;
+    if iter.next().is_some() {
+        // Ambiguous prefix; refuse to guess.
+        return None;
+    }
+    Some(first)
+}
+
+fn block_for_reinforcement(ledger: &Ledger, reinforcement: &Reinforcement) -> Option<Block> {
+    ledger.read_block(&reinforcement.block_id).ok().flatten()
+}
+
+fn ledger_with_reinforcements(
+    server: &CortexServer,
+    project_dir: Option<&str>,
+) -> anyhow::Result<Option<(Ledger, Reinforcements)>> {
+    let Some(path) = resolve_ledger(server, project_dir)? else {
+        return Ok(None);
+    };
+    let Some(ledger) = open_ledger(&path)? else {
+        return Ok(None);
+    };
+    let reinforcements = ledger.read_reinforcements()?;
+    Ok(Some((ledger, reinforcements)))
+}
+
+// ===== ledger-grounded tools =====
+
+pub async fn search_learnings(
+    server: &CortexServer,
+    args: SearchLearningsArgs,
+) -> anyhow::Result<Value> {
+    let category_filter = match args.category.as_deref() {
+        Some(c) => Some(parse_category(c)?),
+        None => None,
+    };
+    let Some((_, reinforcements)) =
+        ledger_with_reinforcements(server, args.project_dir.as_deref())?
+    else {
+        return Ok(json!({"results": [], "total": 0, "error": null}));
+    };
+    let needle = args.query.to_lowercase();
+    let mut hits = Vec::new();
+    for (id, r) in &reinforcements.learnings {
+        if let Some(filter) = category_filter {
+            if r.category != filter {
+                continue;
+            }
+        }
+        if !needle.is_empty() && !r.content.to_lowercase().contains(&needle) {
+            continue;
+        }
+        let conf = effective_confidence(r);
+        if conf < args.min_confidence {
+            continue;
+        }
+        hits.push((id.clone(), r.clone(), conf));
+    }
+    hits.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+    hits.truncate(args.limit);
+    let results: Vec<Value> = hits
+        .iter()
+        .enumerate()
+        .map(|(rank, (id, r, conf))| {
+            let snippet: String = r.content.chars().take(150).collect();
+            json!({
+                "id": shortid(id),
+                "full_id": id,
+                "snippet": snippet,
+                "category": category_value(r.category),
+                "confidence": round2(*conf),
+                "rank": rank,
+            })
+        })
+        .collect();
+    Ok(json!({
+        "query": args.query,
+        "category": args.category,
+        "results": results,
+        "total": results.len(),
+    }))
+}
+
+pub async fn get_learning(server: &CortexServer, args: GetLearningArgs) -> anyhow::Result<Value> {
+    let Some((ledger, reinforcements)) =
+        ledger_with_reinforcements(server, args.project_dir.as_deref())?
+    else {
+        return Ok(json!({"error": "Ledger not found"}));
+    };
+    let Some((id, reinforcement)) = match_prefix(&reinforcements, &args.learning_id) else {
+        return Ok(json!({
+            "error": format!("Learning '{}' not found", args.learning_id)
+        }));
+    };
+    let block = block_for_reinforcement(&ledger, reinforcement);
+    let mut result = Map::new();
+    result.insert("id".into(), Value::String(id.clone()));
+    result.insert(
+        "category".into(),
+        Value::String(category_value(reinforcement.category).into()),
+    );
+    result.insert(
+        "content".into(),
+        Value::String(reinforcement.content.clone()),
+    );
+    result.insert("confidence".into(), json!(round2(reinforcement.confidence)));
+    let source = block
+        .as_ref()
+        .and_then(|b| b.learnings.iter().find(|l| l.id == *id))
+        .and_then(|l| l.source.clone());
+    result.insert("source".into(), Value::from(source));
+    let created = block
+        .as_ref()
+        .map(|b| b.timestamp.as_str())
+        .map(Value::String)
+        .unwrap_or(Value::Null);
+    result.insert("created".into(), created);
+    if args.show_decay {
+        let effective = effective_confidence(reinforcement);
+        result.insert("effective_confidence".into(), json!(round2(effective)));
+        result.insert(
+            "has_decayed".into(),
+            Value::Bool(effective < reinforcement.confidence),
+        );
+    }
+    if args.show_outcomes {
+        let outcomes: Vec<Value> = reinforcement
+            .outcomes
+            .iter()
+            .map(|o| {
+                json!({
+                    "timestamp": o.timestamp.as_str(),
+                    "result": match o.result {
+                        OutcomeResult::Success => "success",
+                        OutcomeResult::Failure => "failure",
+                        OutcomeResult::Partial => "partial",
+                    },
+                    "context": o.context,
+                    "delta": o.delta,
+                })
+            })
+            .collect();
+        result.insert("outcomes".into(), Value::Array(outcomes));
+    }
+    Ok(Value::Object(result))
+}
+
+pub async fn record_outcome(
+    server: &CortexServer,
+    args: RecordOutcomeArgs,
+) -> anyhow::Result<Value> {
+    let outcome = parse_outcome_result(&args.result)?;
+    let Some((ledger, reinforcements)) =
+        ledger_with_reinforcements(server, args.project_dir.as_deref())?
+    else {
+        return Ok(json!({"error": "Ledger not found"}));
+    };
+    let Some((id, _)) = match_prefix(&reinforcements, &args.learning_id) else {
+        return Ok(json!({
+            "error": format!("Learning '{}' not found", args.learning_id)
+        }));
+    };
+    let id = id.clone();
+    let context = args.comment.unwrap_or_default();
+    let new_confidence = ledger.record_outcome(&id, outcome, context)?;
+    Ok(json!({
+        "status": "recorded",
+        "learning_id": shortid(&id),
+        "result": args.result.to_lowercase(),
+        "new_confidence": round2(new_confidence),
+    }))
+}
+
+pub async fn list_learnings(
+    server: &CortexServer,
+    args: ListLearningsArgs,
+) -> anyhow::Result<Value> {
+    let category_filter = match args.category.as_deref() {
+        Some(c) => Some(parse_category(c)?),
+        None => None,
+    };
+    let Some((_, reinforcements)) =
+        ledger_with_reinforcements(server, args.project_dir.as_deref())?
+    else {
+        return Ok(json!({"learnings": [], "total": 0}));
+    };
+    let mut entries: Vec<(String, Reinforcement, f64)> = reinforcements
+        .learnings
+        .into_iter()
+        .filter_map(|(id, r)| {
+            if let Some(filter) = category_filter {
+                if r.category != filter {
+                    return None;
+                }
+            }
+            let effective = effective_confidence(&r);
+            if effective < args.min_confidence {
+                return None;
+            }
+            Some((id, r, effective))
+        })
+        .collect();
+    entries.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+    entries.truncate(args.limit);
+    let results: Vec<Value> = entries
+        .into_iter()
+        .map(|(id, r, effective)| {
+            let snippet: String = r.content.chars().take(100).collect();
+            let mut entry = json!({
+                "id": shortid(&id),
+                "full_id": id,
+                "category": category_value(r.category),
+                "snippet": snippet,
+                "confidence": round2(effective),
+            });
+            if args.show_decay {
+                entry["effective_confidence"] = json!(round2(effective));
+            }
+            entry
+        })
+        .collect();
+    Ok(json!({
+        "learnings": results,
+        "total": results.len(),
+    }))
+}
+
+pub async fn ledger_stats(server: &CortexServer, args: LedgerStatsArgs) -> anyhow::Result<Value> {
+    let Some(path) = resolve_ledger(server, args.project_dir.as_deref())? else {
+        return Ok(json!({"error": "Ledger not found", "exists": false}));
+    };
+    let Some(ledger) = open_ledger(&path)? else {
+        return Ok(json!({"error": "Ledger not found", "exists": false, "path": path}));
+    };
+    let reinforcements = ledger.read_reinforcements()?;
+    let mut by_category: Map<String, Value> = Map::new();
+    let mut high = 0u64;
+    let mut medium = 0u64;
+    let mut low = 0u64;
+    let total = reinforcements.learnings.len();
+    for r in reinforcements.learnings.values() {
+        let cat_key = category_value(r.category).to_string();
+        let entry = by_category.entry(cat_key).or_insert(Value::from(0u64));
+        if let Some(n) = entry.as_u64() {
+            *entry = Value::from(n + 1);
+        }
+        let conf = effective_confidence(r);
+        if conf >= 0.7 {
+            high += 1;
+        } else if conf >= 0.4 {
+            medium += 1;
+        } else {
+            low += 1;
+        }
+    }
+    Ok(json!({
+        "exists": true,
+        "path": path,
+        "total_learnings": total,
+        "by_category": Value::Object(by_category),
+        "by_confidence": { "high": high, "medium": medium, "low": low },
+    }))
+}
+
+pub async fn tag_learning(server: &CortexServer, args: TagLearningArgs) -> anyhow::Result<Value> {
+    let category = parse_category(&args.category)?;
+    let confidence = args.confidence.clamp(0.0, 1.0);
+    let mut content = args.content;
+    if content.chars().count() > 500 {
+        content = content.chars().take(500).collect();
+    }
+    let Some(path) = resolve_ledger(server, args.project_dir.as_deref())? else {
+        return Ok(json!({"error": "Ledger path could not be resolved"}));
+    };
+    let ledger = Ledger::open(&path)?;
+    let source = match args.source_file {
+        Some(s) => Some(format!("mcp_tag:{s}")),
+        None => Some("mcp_tag".to_string()),
+    };
+    let learning = Learning::new(category, content, confidence, source);
+    let learning_id = learning.id.clone();
+    let block = ledger.append_block("mcp-session", vec![learning], true)?;
+    Ok(json!({
+        "status": "created",
+        "learning_id": shortid(&learning_id),
+        "full_id": learning_id,
+        "category": category_value(category),
+        "confidence": confidence,
+        "block_id": shortid(&block.id),
+    }))
+}
+
+pub async fn get_session_summary(
+    server: &CortexServer,
+    args: GetSessionSummaryArgs,
+) -> anyhow::Result<Value> {
+    let Some((ledger, _)) = ledger_with_reinforcements(server, args.project_dir.as_deref())? else {
+        return Ok(json!({"summaries": [], "total": 0}));
+    };
+    let index = ledger.read_index()?;
+    // Group blocks by session_id, derive a lightweight summary per session.
+    let mut sessions: Vec<(String, Vec<Block>)> = Vec::new();
+    for entry in &index.blocks {
+        if let Some(block) = ledger.read_block(&entry.id)? {
+            if let Some(filter) = &args.session_id {
+                if block.session_id != *filter {
+                    continue;
+                }
+            }
+            if let Some((_, blocks)) = sessions.iter_mut().find(|(s, _)| s == &block.session_id) {
+                blocks.push(block);
+            } else {
+                sessions.push((block.session_id.clone(), vec![block]));
+            }
+        }
+    }
+    sessions.sort_by(|a, b| {
+        let last_a = a.1.last().map(|b| b.timestamp.into_inner());
+        let last_b = b.1.last().map(|b| b.timestamp.into_inner());
+        last_b.cmp(&last_a)
+    });
+    sessions.truncate(args.limit);
+    let summaries: Vec<Value> = sessions
+        .into_iter()
+        .map(|(session_id, blocks)| {
+            let last_ts = blocks
+                .last()
+                .map(|b| b.timestamp.as_str())
+                .unwrap_or_default();
+            let learning_ids: Vec<String> = blocks
+                .iter()
+                .flat_map(|b| b.learnings.iter().map(|l| l.id.clone()))
+                .take(10)
+                .collect();
+            let key_decisions: Vec<String> = blocks
+                .iter()
+                .flat_map(|b| b.learnings.iter())
+                .filter(|l| matches!(l.category, LearningCategory::Decision))
+                .map(|l| l.content.chars().take(120).collect::<String>())
+                .take(5)
+                .collect();
+            let summary_text = blocks
+                .iter()
+                .flat_map(|b| b.learnings.iter().map(|l| l.content.as_str()))
+                .collect::<Vec<_>>()
+                .join(" | ");
+            let trimmed: String = summary_text.chars().take(300).collect();
+            json!({
+                "session_id": session_id,
+                "timestamp": last_ts,
+                "summary_text": trimmed,
+                "key_decisions": key_decisions,
+                "files_discussed": Value::Array(vec![]),
+                "learning_ids": learning_ids,
+            })
+        })
+        .collect();
+    Ok(json!({"summaries": summaries, "total": summaries.len()}))
+}
+
+// ===== deferred tools (substrate not yet ported) =====
+
+const DEFERRED_NOTE: &str =
+    "Feature pending v3.x port. v3 ships with the ledger substrate; entity \
+     graph, handoff store, and cross-project recommender are scheduled for \
+     follow-on releases. v4's spectral retrieval (cortex-spectral crate) \
+     subsumes much of this surface area.";
+
+pub async fn get_handoff(_server: &CortexServer, _args: GetHandoffArgs) -> anyhow::Result<Value> {
+    Ok(json!({
+        "handoff": null,
+        "error": DEFERRED_NOTE,
+    }))
+}
+
+pub async fn get_suggestions(
+    _server: &CortexServer,
+    _args: GetSuggestionsArgs,
+) -> anyhow::Result<Value> {
+    Ok(json!({
+        "suggestions": [],
+        "total": 0,
+        "error": DEFERRED_NOTE,
+    }))
+}
+
+pub async fn entity_search(
+    _server: &CortexServer,
+    _args: EntitySearchArgs,
+) -> anyhow::Result<Value> {
+    Ok(json!({
+        "results": [],
+        "total": 0,
+        "error": DEFERRED_NOTE,
+    }))
+}
+
+pub async fn entity_show(_server: &CortexServer, _args: EntityShowArgs) -> anyhow::Result<Value> {
+    Ok(json!({
+        "error": DEFERRED_NOTE,
+    }))
+}
+
+pub async fn entity_stats(_server: &CortexServer, _args: EntityStatsArgs) -> anyhow::Result<Value> {
+    Ok(json!({
+        "indexed": false,
+        "error": DEFERRED_NOTE,
+    }))
+}

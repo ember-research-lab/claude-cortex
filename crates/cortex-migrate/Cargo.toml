@@ -1,0 +1,24 @@
+[package]
+name = "cortex-migrate"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "v2 -> v3 ledger migration / validation tool"
+
+[[bin]]
+name = "cortex-migrate"
+path = "src/main.rs"
+
+[dependencies]
+cortex-core.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

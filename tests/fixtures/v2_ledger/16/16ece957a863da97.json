@@ -1,0 +1,11 @@
+{
+  "type": "learning",
+  "content_hash": "16ece957a863da97",
+  "category": "decision",
+  "content": "SHA-256 stays despite spec mentioning BLAKE3, because backwards compatibility wins",
+  "confidence": 0.55,
+  "source": null,
+  "first_seen": "2026-05-06T21:45:04.564812+00:00",
+  "project_context": null,
+  "stored_at": "2026-05-06T21:45:04.565843+00:00"
+}

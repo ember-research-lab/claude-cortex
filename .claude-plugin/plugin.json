@@ -1,0 +1,37 @@
+{
+  "name": "claude-cortex",
+  "version": "0.3.0",
+  "description": "Persistent memory that makes Claude Code smarter across sessions",
+  "author": {
+    "name": "Claude Cortex Contributors"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/ember-research-lab/claude-cortex",
+  "repository": "https://github.com/ember-research-lab/claude-cortex",
+  "keywords": ["ledger", "memory", "learning", "reinforcement", "blockchain"],
+  "agents": [
+    "./agents/bug-investigator.md",
+    "./agents/code-implementer.md",
+    "./agents/falsifier-spec.md",
+    "./agents/knowledge-retriever.md",
+    "./agents/outcome-recorder.md",
+    "./agents/refactorer.md",
+    "./agents/research-agent.md",
+    "./agents/task-decomposer.md",
+    "./agents/test-writer.md",
+    "./agents/verifier.md"
+  ],
+  "skills": [
+    "./skills/cortex-orientation/SKILL.md",
+    "./skills/handoff-management/SKILL.md",
+    "./skills/ledger-knowledge/SKILL.md",
+    "./skills/learning-capture/SKILL.md"
+  ],
+  "mcpServers": {
+    "cortex": {
+      "command": "cortex-mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}
