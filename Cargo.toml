@@ -5,6 +5,11 @@ members = [
     "crates/cortex-mcp",
     "crates/cortex-hooks",
     "crates/cortex-migrate",
+    "crates/cortex-embeddings",
+    "crates/cortex-spectral",
+    "crates/cortex-active-memory",
+    "crates/cortex-monitor",
+    "crates/cortex-dream",
 ]
 
 [workspace.package]
@@ -55,6 +60,19 @@ hex = "0.4"
 
 # JSON Schema (rmcp tool param schemas)
 schemars = { version = "1", features = ["chrono04"] }
+
+# v4 spectral layer
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+nalgebra = "0.33"
+nalgebra-sparse = "0.10"
+futures = "0.3"
+async-trait = "0.1"
+
+# Internal v4 crates
+cortex-embeddings = { path = "crates/cortex-embeddings" }
+cortex-spectral = { path = "crates/cortex-spectral" }
+cortex-active-memory = { path = "crates/cortex-active-memory" }
+cortex-monitor = { path = "crates/cortex-monitor" }
 
 # Filesystem helpers
 tempfile = "3"
