@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Dreaming pass — embed, build graph, decompose, write active memory + spectrum snapshot (v4)"
+description = "Dreaming pass — index, build graph, decompose, write active memory + spectrum snapshot (v4)"
 
 [[bin]]
 name = "cortex-dream"
@@ -14,11 +14,10 @@ path = "src/main.rs"
 
 [dependencies]
 cortex-core.workspace = true
-cortex-embeddings.workspace = true
+cortex-similarity.workspace = true
 cortex-spectral.workspace = true
 cortex-active-memory.workspace = true
 cortex-monitor.workspace = true
 clap.workspace = true
 anyhow.workspace = true
-tokio.workspace = true
 chrono.workspace = true
