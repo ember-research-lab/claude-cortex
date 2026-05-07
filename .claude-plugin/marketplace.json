@@ -10,12 +10,16 @@
     {
       "name": "claude-cortex",
       "source": {
-        "type": "github",
+        "source": "github",
         "repo": "ember-research-lab/claude-cortex"
       },
-      "version": "0.3.0",
       "description": "Persistent memory that makes Claude Code smarter across sessions",
       "category": "memory",
+      "author": {
+        "name": "Ember Research Lab",
+        "email": "emberresearchlab@gmail.com"
+      },
+      "homepage": "https://github.com/ember-research-lab/claude-cortex",
       "keywords": [
         "ledger",
         "memory",
