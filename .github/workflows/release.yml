@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-13
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross (linux aarch64 only)
+        if: matrix.cross == true
+        run: cargo install cross --locked
+
+      - name: Build (cargo)
+        if: matrix.cross != true
+        run: cargo build --release --target ${{ matrix.target }} --bin cortex-mcp --bin cortex-session-start --bin cortex-post-tool-use --bin cortex-session-end --bin cortex-migrate
+
+      - name: Build (cross)
+        if: matrix.cross == true
+        run: cross build --release --target ${{ matrix.target }} --bin cortex-mcp --bin cortex-session-start --bin cortex-post-tool-use --bin cortex-session-end --bin cortex-migrate
+
+      - name: Stage artifacts (unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          STAGE="claude-cortex-${TARGET}"
+          mkdir -p "$STAGE"
+          for bin in cortex-mcp cortex-session-start cortex-post-tool-use cortex-session-end cortex-migrate; do
+            cp "target/${TARGET}/release/$bin" "$STAGE/"
+          done
+          cp README.md LICENSE "$STAGE/"
+          tar czf "$STAGE.tar.gz" "$STAGE"
+          shasum -a 256 "$STAGE.tar.gz" > "$STAGE.tar.gz.sha256"
+
+      - name: Stage artifacts (windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          $stage = "claude-cortex-$Env:TARGET"
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          foreach ($bin in @("cortex-mcp", "cortex-session-start", "cortex-post-tool-use", "cortex-session-end", "cortex-migrate")) {
+            Copy-Item "target/$Env:TARGET/release/$bin.exe" "$stage/"
+          }
+          Copy-Item README.md $stage
+          Copy-Item LICENSE $stage
+          Compress-Archive -Path $stage -DestinationPath "$stage.zip"
+          $hash = (Get-FileHash "$stage.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash *$stage.zip" | Out-File -FilePath "$stage.zip.sha256" -Encoding ascii
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-cortex-${{ matrix.target }}
+          path: |
+            claude-cortex-${{ matrix.target }}.*
+
+  release:
+    name: release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true

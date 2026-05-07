@@ -1,0 +1,28 @@
+[package]
+name = "cortex-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Cortex substrate: ledger, signing, hash chain, Merkle tree, content-addressed storage"
+
+[dependencies]
+ed25519-dalek.workspace = true
+sha2.workspace = true
+blake3.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+tempfile.workspace = true
+fs2.workspace = true
+uuid.workspace = true
+base64.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

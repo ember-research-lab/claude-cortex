@@ -1,0 +1,54 @@
+{
+  "learnings": {
+    "4a9bb185-4036-41ff-9aad-f5bbee2094fc": {
+      "category": "discovery",
+      "content": "cortex-core preserves v2 substrate format byte for byte",
+      "confidence": 0.7,
+      "outcome_count": 1,
+      "last_updated": "2026-05-06T21:45:04.575249+00:00",
+      "last_applied": "2026-05-06T21:45:04.575251+00:00",
+      "block_id": "ea3f642c-cb9d-4563-9dea-a618d425cb59",
+      "content_hash": "6d3ff6f085b139b5",
+      "object_store_hash": "6d3ff6f085b139b5",
+      "outcomes": [
+        {
+          "timestamp": "2026-05-06T21:45:04.575241+00:00",
+          "result": "success",
+          "context": "verified by inspecting v2 wire format",
+          "delta": 0.1
+        }
+      ]
+    },
+    "5e0d0e30-2402-4095-8510-5e62d771922e": {
+      "category": "pattern",
+      "content": "atomic writes use tempfile + rename inside a flock-held parent",
+      "confidence": 0.52,
+      "outcome_count": 1,
+      "last_updated": "2026-05-06T21:45:04.575518+00:00",
+      "last_applied": "2026-05-06T21:45:04.575520+00:00",
+      "block_id": "ea3f642c-cb9d-4563-9dea-a618d425cb59",
+      "content_hash": "119165dfdc5def6e",
+      "object_store_hash": "119165dfdc5def6e",
+      "outcomes": [
+        {
+          "timestamp": "2026-05-06T21:45:04.575511+00:00",
+          "result": "partial",
+          "context": "confirmed for index/objects path; chain.py append uses different sequencing",
+          "delta": 0.02
+        }
+      ]
+    },
+    "4a030d82-78ff-48da-ae42-2d7d96776c8e": {
+      "category": "decision",
+      "content": "SHA-256 stays despite spec mentioning BLAKE3, because backwards compatibility wins",
+      "confidence": 0.55,
+      "outcome_count": 0,
+      "last_updated": "2026-05-06T21:45:04.565969+00:00",
+      "last_applied": "2026-05-06T21:45:04.565974+00:00",
+      "block_id": "e58f7d8e-3d37-471d-96b5-1c7a38cb7ca8",
+      "content_hash": "16ece957a863da97",
+      "object_store_hash": "16ece957a863da97",
+      "outcomes": []
+    }
+  }
+}

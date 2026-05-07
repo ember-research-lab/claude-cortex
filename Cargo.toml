@@ -1,0 +1,76 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/cortex-core",
+    "crates/cortex-mcp",
+    "crates/cortex-hooks",
+    "crates/cortex-migrate",
+]
+
+[workspace.package]
+version = "0.3.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+authors = ["Claude Cortex Contributors"]
+repository = "https://github.com/ember-research-lab/claude-cortex"
+homepage = "https://github.com/ember-research-lab/claude-cortex"
+description = "Persistent memory that makes Claude Code smarter across sessions"
+
+[workspace.dependencies]
+# MCP server (official Rust SDK)
+rmcp = { version = "0.16", features = ["server", "transport-io"] }
+
+# Crypto / hashing
+ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8", "pem"] }
+sha2 = "0.10"
+blake3 = "1"
+rand = "0.8"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "fs", "sync", "signal"] }
+
+# Errors
+anyhow = "1"
+thiserror = "2"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUIDs
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Base64
+base64 = "0.22"
+
+# Hex
+hex = "0.4"
+
+# JSON Schema (rmcp tool param schemas)
+schemars = { version = "1", features = ["chrono04"] }
+
+# Filesystem helpers
+tempfile = "3"
+fs2 = "0.4"
+
+# Internal
+cortex-core = { path = "crates/cortex-core" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+[profile.release-hooks]
+inherits = "release"
+opt-level = "z"
+lto = "fat"

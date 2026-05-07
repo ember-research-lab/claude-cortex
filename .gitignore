@@ -1,0 +1,12 @@
+/target
+**/*.rs.bk
+Cargo.lock.bak
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Never commit private keys or runtime flock sentinels
+**/.private_key
+**/.*.json.lock

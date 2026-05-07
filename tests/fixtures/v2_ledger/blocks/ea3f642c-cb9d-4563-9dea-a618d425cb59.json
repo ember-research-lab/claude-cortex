@@ -1,0 +1,45 @@
+{
+  "id": "ea3f642c-cb9d-4563-9dea-a618d425cb59",
+  "timestamp": "2026-05-06T21:45:03.523577Z",
+  "session_id": "fixture-session-1",
+  "parent_block": null,
+  "learnings": [
+    {
+      "id": "4a9bb185-4036-41ff-9aad-f5bbee2094fc",
+      "category": "discovery",
+      "content": "cortex-core preserves v2 substrate format byte for byte",
+      "content_hash": "6d3ff6f085b139b5",
+      "confidence": 0.6,
+      "privacy": "public",
+      "source": "cortex-v3-refactor.md",
+      "outcomes": [],
+      "created_at": "2026-05-06T21:45:03.523324Z",
+      "last_applied": null,
+      "project_context": null,
+      "derived_from": null,
+      "learning_source": "session",
+      "git_metadata": null,
+      "co_authors": []
+    },
+    {
+      "id": "5e0d0e30-2402-4095-8510-5e62d771922e",
+      "category": "pattern",
+      "content": "atomic writes use tempfile + rename inside a flock-held parent",
+      "content_hash": "119165dfdc5def6e",
+      "confidence": 0.5,
+      "privacy": "public",
+      "source": null,
+      "outcomes": [],
+      "created_at": "2026-05-06T21:45:03.523387Z",
+      "last_applied": null,
+      "project_context": null,
+      "derived_from": null,
+      "learning_source": "session",
+      "git_metadata": null,
+      "co_authors": []
+    }
+  ],
+  "author_key_id": "3839BA",
+  "signature": "FdV5Ynl1gE0NkHKXhUo0pphSrXrXyR48woXy54j4uZKwJMkJhdYU1NqzB8IywSguRpzfRUkJu0eSpuGIKXWQCg==",
+  "hash": "b9d40b365984a66e0fdd85081d7c06ee759f48c23b9194f32ec8564fd8f19c72"
+}

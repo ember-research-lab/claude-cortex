@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json.schemastore.org/anthropic-claude-plugin-marketplace.json",
+  "name": "ember-research-lab",
+  "owner": {
+    "name": "Ember Research Lab",
+    "email": "emberresearchlab@gmail.com",
+    "url": "https://github.com/ember-research-lab"
+  },
+  "plugins": [
+    {
+      "name": "claude-cortex",
+      "source": {
+        "type": "github",
+        "repo": "ember-research-lab/claude-cortex"
+      },
+      "version": "0.3.0",
+      "description": "Persistent memory that makes Claude Code smarter across sessions",
+      "category": "memory",
+      "keywords": [
+        "ledger",
+        "memory",
+        "learning",
+        "reinforcement",
+        "blockchain"
+      ]
+    }
+  ]
+}

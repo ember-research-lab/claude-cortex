@@ -1,0 +1,28 @@
+{
+  "id": "e58f7d8e-3d37-471d-96b5-1c7a38cb7ca8",
+  "timestamp": "2026-05-06T21:45:04.564995Z",
+  "session_id": "fixture-session-2",
+  "parent_block": "ea3f642c-cb9d-4563-9dea-a618d425cb59",
+  "learnings": [
+    {
+      "id": "4a030d82-78ff-48da-ae42-2d7d96776c8e",
+      "category": "decision",
+      "content": "SHA-256 stays despite spec mentioning BLAKE3, because backwards compatibility wins",
+      "content_hash": "16ece957a863da97",
+      "confidence": 0.55,
+      "privacy": "public",
+      "source": null,
+      "outcomes": [],
+      "created_at": "2026-05-06T21:45:04.564812Z",
+      "last_applied": null,
+      "project_context": null,
+      "derived_from": null,
+      "learning_source": "session",
+      "git_metadata": null,
+      "co_authors": []
+    }
+  ],
+  "author_key_id": "3839BA",
+  "signature": "1PiVPV8nZffUs9UAOLzJP6WAOat7i/cTg2h/BVYNXLoorFqELDnbPtuh4uxB8Td4OunYoEYF4cKtL/dONph9DA==",
+  "hash": "093f7b138873aae51e5cfa02c9a9c31a4886d70949f7470763fce09d7303ae27"
+}
