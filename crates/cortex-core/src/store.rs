@@ -290,14 +290,25 @@ impl Drop for LockGuard {
     }
 }
 
-fn exclusive_lock(path: &Path) -> Result<LockGuard> {
+/// Acquire an exclusive lock for `data_path` by locking a sibling sentinel
+/// `.<data_path>.lock`. We lock the sentinel rather than the data file
+/// because Windows file locks (LockFileEx) are mandatory: locking the data
+/// file directly blocks subsequent reads of the same file from the same
+/// process. POSIX flock is advisory so this works on Linux/macOS, but the
+/// cross-platform contract requires sentinel-style locking. v2 cortex used
+/// this same pattern (`.<name>.json.lock` siblings).
+fn exclusive_lock(data_path: &Path) -> Result<LockGuard> {
+    let lock_path = sentinel_lock_path(data_path);
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
+    }
     let file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .open(path)
-        .map_err(|e| Error::io(path, e))?;
+        .open(&lock_path)
+        .map_err(|e| Error::io(&lock_path, e))?;
     let deadline = std::time::Instant::now() + Duration::from_millis(LOCK_TIMEOUT_MS);
     loop {
         match file.try_lock_exclusive() {
@@ -305,9 +316,18 @@ fn exclusive_lock(path: &Path) -> Result<LockGuard> {
             Err(_) if std::time::Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(LOCK_RETRY_MS));
             }
-            Err(e) => return Err(Error::io(path, e)),
+            Err(e) => return Err(Error::io(&lock_path, e)),
         }
     }
+}
+
+fn sentinel_lock_path(data_path: &Path) -> PathBuf {
+    let parent = data_path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = data_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("ledger");
+    parent.join(format!(".{file_name}.lock"))
 }
 
 #[doc(hidden)]
