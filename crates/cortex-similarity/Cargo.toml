@@ -1,12 +1,12 @@
 [package]
-name = "cortex-embeddings"
+name = "cortex-similarity"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Embedding generation + content-addressed cache for the cortex spectral layer"
+description = "BM25 lexical similarity over cortex learnings — fully self-contained, no external API or model download"
 
 [dependencies]
 cortex-core.workspace = true
@@ -14,12 +14,6 @@ serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
-chrono.workspace = true
-sha2.workspace = true
-hex.workspace = true
-reqwest.workspace = true
-tokio.workspace = true
-async-trait.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

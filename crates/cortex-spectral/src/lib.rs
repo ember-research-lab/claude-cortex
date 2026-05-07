@@ -116,9 +116,16 @@ pub fn default_top_k(n_nodes: usize) -> usize {
     cap.min(scaled)
 }
 
+/// Build a learning graph from ledger learnings + their pairwise BM25
+/// similarity + co-occurrence + outcome correlation. **STUB** — Phase 2
+/// fills in the real construction; for now returns an empty graph.
+///
+/// `similarity` is the matrix from
+/// `cortex_similarity::Bm25Index::pairwise_similarity()` — values
+/// already normalized to `[0, 1]`.
 pub fn build_graph(
     _learnings: &[(NodeId, String)],
-    _embeddings: &BTreeMap<NodeId, Vec<f32>>,
+    _similarity: &cortex_similarity::SimilarityMatrix,
     _co_occurrence: &BTreeMap<(NodeId, NodeId), f64>,
     _outcome_correlation: &BTreeMap<(NodeId, NodeId), f64>,
 ) -> LearningGraph {

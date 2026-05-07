@@ -1,9 +1,9 @@
 //! cortex-dream — dreaming-pass binary (v4).
 //!
-//! Reads the cortex ledger, ensures every learning has an embedding (filling
-//! the cache as needed), builds the learning graph, decomposes the Laplacian,
-//! emits an active-memory snapshot, and records a spectrum-history snapshot
-//! for cortex-monitor.
+//! Reads the cortex ledger, indexes its content via BM25 (cortex-similarity),
+//! builds the learning graph, decomposes the Laplacian, emits an
+//! active-memory snapshot, and records a spectrum-history snapshot for
+//! cortex-monitor.
 //!
 //! Status: SCAFFOLD — only the CLI surface and the orchestrating function
 //! signature are present. The actual pipeline is wired up in Phase 5.
@@ -32,8 +32,7 @@ struct Args {
     k: Option<usize>,
 }
 
-#[tokio::main(flavor = "multi_thread")]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     eprintln!(
         "cortex-dream v{} — scaffold only (v4 Phase 5)",
