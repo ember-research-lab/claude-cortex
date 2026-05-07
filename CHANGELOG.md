@@ -4,6 +4,13 @@ All notable changes to claude-cortex are documented here. Format follows [Keep a
 
 ## [Unreleased]
 
+## [0.3.3] — 2026-05-07
+
+CI matrix cleanup so release artifacts actually publish.
+
+### Fixed
+- **macOS x86_64 (Intel) target dropped from release matrix.** GitHub Actions has been deprecating `macos-13` runners (Intel) in favor of `macos-latest` / `macos-14` (Apple Silicon). The v0.3.2 Release run sat queued for 6+ minutes waiting for an Intel runner that wasn't coming. The release job has `needs: build` so all 5 matrix targets must succeed before any artifacts publish — one stuck job blocked the entire release. Apple Silicon coverage stays via `aarch64-apple-darwin`. If Intel-Mac demand surfaces later we can build via cross-compile from `macos-latest` rather than rely on the deprecated Intel runner pool.
+
 ## [0.3.2] — 2026-05-07
 
 Cross-platform fix-up of the v0.3.1 patch. The v0.3.1 tag exists but its CI run failed on Windows; v0.3.2 is the green release. No source-level changes from v0.3.1 beyond what's listed here.
