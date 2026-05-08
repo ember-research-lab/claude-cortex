@@ -4,6 +4,30 @@ All notable changes to claude-cortex are documented here. Format follows [Keep a
 
 ## [Unreleased]
 
+## [0.4.0-rc1] — 2026-05-08
+
+First release candidate of the v4 line. Spectral retrieval (cortex-similarity / cortex-spectral / cortex-active-memory / cortex-monitor / cortex-dream) lands as the new substrate-respecting layer on top of the v3 ledger; alongside it, the handoff substrate fills the "ephemeral state" gap surfaced during the v0.3.6 pattern-vs-state work. Orientation is now auto-injected at SessionStart so it doesn't depend on Skill-tool surfacing quirks.
+
+### Added
+- **`cortex-handoff` crate** — work-in-progress state capture for cross-session continuity. State (paused tasks, current blockers, files in flight, free-form context) is the right home for things that go stale within days/weeks; the long-term ledger keeps its substrate-inviolability for durable patterns. Persistence: `<state-root>/handoffs/handoff-{ts}.json` (append-only) + atomic `current` pointer (temp+rename).
+- **`tag_handoff` MCP tool** — record a fresh handoff at a pause-point. Captures completed/pending tasks, blockers, modified files, and free-form context notes, plus session id + timestamp.
+- **`get_handoff` MCP tool** — replaced the v0.3.x stub. With no args, returns the most-recent handoff across all sessions; with `session_id`, returns the latest handoff for that specific session.
+- **`/handoff` slash command** — thin wrapper over `tag_handoff` for quick pause-point capture.
+- **SessionStart hook auto-injects orientation.** The cortex-orientation skill body is now embedded into the SessionStart additionalContext via `include_str!`, so orientation directives load deterministically every session regardless of plugin-loader / Skill-tool discovery quirks. The skill itself remains the single source of truth — edit `skills/cortex-orientation/SKILL.md` and the hook picks it up on next rebuild. Skill-tool invocation still works for explicit recall via trigger phrases ("orient me", "cortex orientation", "what's the cortex protocol").
+- **Spectral substrate (v4 core)** — full pipeline lands: BM25 lexical similarity (no embedding model, no API), Laplacian eigendecomposition with deterministic eigenvector sign canonicalization, active-memory snapshots with eigenvalues + per-entry mode projections, spectrum-history monitoring with trajectory classification (Converged / ApproachingXiCross / Bifurcation / Indeterminate), and the `cortex-dream` pipeline orchestrating all six steps.
+
+### Changed
+- **`cortex-orientation` description** now includes trigger phrases for explicit invocation (fallback when SessionStart injection misses), and a new "Handoffs vs the ledger" section explaining when to use `tag_handoff` vs `tag_learning`.
+- **`post_tool_use` hook — three orthogonal token optimizations** clear the v0.3.6-deferred items:
+  - **Compressed directive (~4× reduction).** The previous ~280-token prose collapses to ~60 tokens while preserving the pattern-not-state and context-not-snippet filters. The handoff reminder moves to the orientation skill (loaded once per session) instead of paying rent on every PostToolUse fire.
+  - **Result-aware skip.** The hook now parses `tool_response` from the input. Empty arrays, errored payloads, zero-hit search results, `{"total": 0}`, and prose-form "no results found" all suppress the fire. Critically, suppressed-by-result fires do NOT consume the dedup window — a zero-hit search followed by a real one still nudges.
+  - **Cross-process dedup window.** Sidecar at `<cache>/cortex/hook-recent.json` (atomic temp+rename) tracks last-fire epoch per `<session>::<tool>`. Same-tool fires within 30 seconds are suppressed; parallel bursts collapse to a single nudge. Per-session scoping prevents two concurrent terminals from silencing each other. Override via `CORTEX_HOOK_DEDUP_PATH` for tests / non-standard cache layouts.
+  - **Per-tool-family wording.** Web fires reference "external docs / API contracts"; external MCP fires reference "service quirks / API patterns".
+- **`get_handoff` description** clarifies the with/without `session_id` semantics so the agent knows when to scope vs read globally.
+
+### Why this matters
+v0.3.6 surfaced the pattern-vs-state distinction during real-data audit but didn't yet provide a *home* for state. The handoff substrate is that home — it's the difference between "I told the model about my pause point and lost it" and "the next session reads the handoff first and resumes cleanly." Combined with auto-injected orientation, the v4-rc1 baseline is that any cortex-equipped session starts with both the operating-mode directives AND the latest pause-point context loaded.
+
 ## [0.3.6] — 2026-05-08
 
 Pattern-vs-state filter at write-time. Surfaced from a real-data audit of chat-distilled learnings: ~43% failure rate on snippet-only distillation, with state-shaped distillations failing far more often than pattern-shaped ones because their surface form looks specific (numbers, file counts, draft versions) without binding to enduring structure.
