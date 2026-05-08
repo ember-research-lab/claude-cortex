@@ -27,17 +27,25 @@ pub const V2_REINFORCEMENTS_FILE: &str = "reinforcements.json";
 pub const V2_MERKLE_FILE: &str = "merkle.json";
 pub const V2_IDENTITY_FILE: &str = "identity.json";
 
-/// Parse Python's two ISO-8601 forms (Pydantic `Z` suffix or
-/// `datetime.isoformat()` `+00:00` offset).
+/// Parse Python's three ISO-8601 forms found in real v2 ledgers:
+/// - Pydantic `Z` suffix (`2026-05-06T21:45:03.523577Z`)
+/// - `datetime.isoformat()` with `+00:00` offset
+/// - **Naive** (no timezone) — early v2 ledgers omit the offset because
+///   `datetime.now()` (without `tz=UTC`) returns a naive datetime, and
+///   Python's `fromisoformat` accepts it. We treat naive timestamps as
+///   UTC since that's what v2 always intended (the early bug was fixed
+///   later but pre-fix entries retain the naive form).
 pub fn parse_python_iso(s: &str) -> Result<DateTime<Utc>> {
     if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
         return Ok(dt.with_timezone(&Utc));
     }
-    let normalized = s.strip_suffix('Z').map(|prefix| format!("{prefix}+00:00"));
-    if let Some(s) = normalized {
-        return Ok(DateTime::parse_from_rfc3339(&s)
-            .map_err(|e| Error::Malformed(format!("python iso datetime: {e}")))?
-            .with_timezone(&Utc));
+    if let Some(prefix) = s.strip_suffix('Z') {
+        if let Ok(dt) = DateTime::parse_from_rfc3339(&format!("{prefix}+00:00")) {
+            return Ok(dt.with_timezone(&Utc));
+        }
+    }
+    if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f") {
+        return Ok(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc));
     }
     Err(Error::Malformed(format!(
         "could not parse python iso datetime: {s}"
@@ -45,11 +53,25 @@ pub fn parse_python_iso(s: &str) -> Result<DateTime<Utc>> {
 }
 
 /// Format a UTC datetime using Python's `datetime.isoformat()` form
-/// (microsecond precision, `+00:00` offset). This is the canonical form for
-/// v2 block hash recomputation.
+/// (microsecond precision, `+00:00` offset). Use this only when you know
+/// the original was timezone-aware.
 pub fn format_python_iso(dt: &DateTime<Utc>) -> String {
     let core = dt.format("%Y-%m-%dT%H:%M:%S%.6f").to_string();
     format!("{core}+00:00")
+}
+
+/// Convert a v2 timestamp string to its canonical hash-input form.
+/// v2 hashed timestamps via `datetime.isoformat()`:
+///   - For tz-aware datetimes (Pydantic `Z` form), this produces `+00:00`.
+///   - For naive datetimes (early v2 ledger bug), this produces the naive
+///     form unchanged.
+/// So: `Z` → `+00:00`; naive → naive (passthrough).
+pub fn canonical_hash_timestamp(s: &str) -> String {
+    if let Some(prefix) = s.strip_suffix('Z') {
+        format!("{prefix}+00:00")
+    } else {
+        s.to_string()
+    }
 }
 
 /// Serialize a `serde_json::Value` using Python `json.dumps(sort_keys=True)`
@@ -227,7 +249,10 @@ pub fn list_block_ids(root: &Path) -> Result<Vec<String>> {
 /// `sha256(json.dumps({id, timestamp.isoformat(), session_id, parent_block,
 /// learnings: [hash_dict, ...]}, sort_keys=True))`.
 pub fn compute_v2_block_hash(block: &V2Block) -> Result<String> {
-    let timestamp = parse_python_iso(&block.timestamp)?;
+    // Validate parses (catches truly malformed entries) but emit the
+    // canonical hash-input form: `Z`→`+00:00`, naive→naive.
+    parse_python_iso(&block.timestamp)?;
+    let canonical_ts = canonical_hash_timestamp(&block.timestamp);
     let mut learnings = Vec::with_capacity(block.learnings.len());
     for learning in &block.learnings {
         let outcomes_value = Value::Array(learning.outcomes.clone());
@@ -242,10 +267,7 @@ pub fn compute_v2_block_hash(block: &V2Block) -> Result<String> {
     }
     let mut top = Map::new();
     top.insert("id".to_string(), Value::String(block.id.clone()));
-    top.insert(
-        "timestamp".to_string(),
-        Value::String(format_python_iso(&timestamp)),
-    );
+    top.insert("timestamp".to_string(), Value::String(canonical_ts));
     top.insert(
         "session_id".to_string(),
         Value::String(block.session_id.clone()),
