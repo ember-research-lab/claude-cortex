@@ -39,15 +39,27 @@ fn build_directive(event: &ToolEvent) -> String {
         "# Discovery-Tagging Post-Condition".to_string(),
         String::new(),
         format!(
-            "Tool just ran: `{tool}`. If the result revealed something \
-             non-obvious about this codebase, an external API, or a reusable \
-             pattern that isn't already in the cortex ledger, capture it via \
-             `tag_learning` with the appropriate category."
+            "Tool just ran: `{tool}`. If the result revealed a durable \
+             pattern, framework, or decision that a future Claude session \
+             would benefit from — and that isn't already in the cortex \
+             ledger — capture it via `tag_learning`."
         ),
         String::new(),
-        "Heuristic: tag if a future Claude session would benefit from \
-         knowing this without re-running the tool. Skip routine output \
-         (file lists, simple reads, expected results)."
+        "Two filters before tagging:".to_string(),
+        "1. **Pattern, not state.** Will this still be true in a year? \
+         Patterns / frameworks / decisions go in the ledger. Current state \
+         snapshots (file counts, draft versions, current params, training \
+         step numbers) DO NOT — they go stale and don't fit any category. \
+         Defer state to the handoff layer or session notes."
+            .to_string(),
+        "2. **Context, not snippet.** When the tool output is a search \
+         hit or excerpt, read enough surrounding context to extract the \
+         actual pattern. Snippet-level distillation has a measured ~43% \
+         failure rate (real-data audit, May 2026)."
+            .to_string(),
+        String::new(),
+        "Skip routine output (file lists, simple reads, expected results) \
+         entirely."
             .to_string(),
     ];
     lines.join("\n")

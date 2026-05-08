@@ -1,7 +1,7 @@
 ---
 name: cortex-orientation
 description: Default operating mode for cortex-equipped sessions. Auto-loads on every session start. Establishes orchestrator identity, situation modeling, listening protocol, producer/verifier separation, and substrate inviolability.
-version: 0.3.5
+version: 0.3.6
 ---
 
 # Cortex Orientation
@@ -22,6 +22,17 @@ You are the orchestrator. The main session is not a subagent invoked through a t
 The session_start hook surfaces top-confidence learnings from the project + global ledger. **Scan them first.** If any apply to the user's request, apply them directly and call `record_outcome` once exercised — success / partial / failure with a one-line context. This is how confidence converges to reality.
 
 For substantive tool runs, the post_tool_use hook nudges discovery-tagging. If a tool call surfaces a non-obvious fact about the codebase, an external API, or a reusable pattern that isn't already in the ledger, persist via `tag_learning` so the next session benefits.
+
+## Pattern vs state — what NOT to tag
+
+Cortex's four categories (discovery / decision / error / pattern) all assume **durable** content. Before calling `tag_learning`, ask: *will this still be true in a year?*
+
+- **Pattern / framework / decision (durable, tag it)**: "BM25 is a strong signal for short ledger entries", "fs2 LockFileEx is mandatory locking on Windows", "Aaron's Yang-Mills proof uses Bakry-Émery + Agmon localization on a spectral Laplacian", "PGA security is mathematical and scale-independent vs coherence is capacity-dependent".
+- **State snapshot (DO NOT tag)**: "36 Lean files, 19 proven, 1 sorry remaining", "training currently at step 25000", "patent draft is at v2", "Ember test running on 30M params". These belong in the handoff layer (or session notes), not the long-term ledger — they go stale within days/weeks.
+
+If a finding is mixed (durable framework + transient numbers), tag only the framework and drop the numbers. Substrate-inviolability of the ledger means a learning, once written, is immutable; only its confidence decays. State-shaped learnings rot in a way the format wasn't designed for.
+
+When harvesting from external sources (chat search, web docs, external MCP results): always read enough surrounding context to extract the pattern, not the snippet. Snippet-level distillation produces state-shaped surface text that fails the durability test. The methodology learning has a 0.95 confidence after a real-data audit found ~43% failure rate on snippet-only distillation.
 
 ## Producer/verifier in practice
 
