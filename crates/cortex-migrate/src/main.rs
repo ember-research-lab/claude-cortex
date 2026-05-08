@@ -46,6 +46,15 @@ struct Args {
     /// Validate only; do not write.
     #[arg(long)]
     check: bool,
+
+    /// Migrate even if some blocks fail hash validation. Older v2 builds
+    /// occasionally wrote stale hashes (e.g. when hash_dict shape changed
+    /// after the block was first written), so a strict refusal would
+    /// strand otherwise-valid content. Mismatched blocks are migrated
+    /// with a fresh v3 hash; the audit file records which ones were
+    /// affected.
+    #[arg(long)]
+    force: bool,
 }
 
 fn main() -> Result<()> {
@@ -62,12 +71,26 @@ fn main() -> Result<()> {
         report.hash_mismatches.len(),
         report.missing_blocks.len(),
     );
-    if !report.is_clean() {
-        eprintln!("hash mismatches: {:?}", report.hash_mismatches);
-        eprintln!("missing blocks:  {:?}", report.missing_blocks);
-        anyhow::bail!("v2 ledger failed validation; refusing to migrate");
+    if !report.hash_mismatches.is_empty() {
+        for (id, stored, computed) in &report.hash_mismatches {
+            eprintln!("  hash mismatch: block {id} stored={stored} computed={computed}");
+        }
     }
-    eprintln!("v2 validation OK");
+    if !report.missing_blocks.is_empty() {
+        eprintln!("missing blocks:  {:?}", report.missing_blocks);
+    }
+    if !report.is_clean() && !args.force {
+        anyhow::bail!(
+            "v2 ledger failed validation; refusing to migrate. Pass --force to \
+             migrate anyway (mismatched blocks will be re-hashed in v3 form; the \
+             original stored hash is recorded in MIGRATION.json for audit)."
+        );
+    }
+    if args.force && !report.is_clean() {
+        eprintln!("--force: proceeding despite validation issues");
+    } else {
+        eprintln!("v2 validation OK");
+    }
 
     if args.check || args.to.is_none() {
         eprintln!("(check-only mode; nothing written)");
@@ -350,16 +373,22 @@ fn transcribe_reinforcements(from: &Path) -> Result<Option<Reinforcements>> {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
+        // v2 reinforcements.json originally didn't store content_hash; later
+        // versions added the field. Compute it deterministically from the
+        // content when missing or empty so v3 readers (BM25, object store)
+        // can use it as a stable doc ID.
         let content_hash = raw_obj
             .get("content_hash")
             .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| cortex_core::hashing::compute_content_hash(&content));
         let object_store_hash = raw_obj
             .get("object_store_hash")
             .and_then(|v| v.as_str())
-            .unwrap_or(content_hash.as_str())
-            .to_string();
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| content_hash.clone());
         let outcomes: Vec<ReinforcementOutcome> = raw_obj
             .get("outcomes")
             .and_then(|v| v.as_array())

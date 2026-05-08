@@ -4,6 +4,18 @@ All notable changes to claude-cortex are documented here. Format follows [Keep a
 
 ## [Unreleased]
 
+## [0.3.5] — 2026-05-08
+
+cortex-migrate fixes surfaced from migrating a real v2 global ledger (35 learnings, 6 blocks). v0.3.4 cortex-migrate refused to touch ledgers that had any of three real-world quirks; v0.3.5 handles them.
+
+### Fixed
+- **Naive timestamps in v2 ledgers**: early v2 builds wrote `datetime.now()` (no tz) instead of `datetime.now(timezone.utc)`, producing timestamps like `2025-12-27T21:26:55.573704` without offset. `parse_python_iso` now accepts naive timestamps and treats them as UTC. Hash recomputation preserves the original form (naive→naive, `Z`→`+00:00`) via a new `canonical_hash_timestamp` helper, since v2 hashed naive blocks with the naive string.
+- **Stale stored hashes in v2 blocks**: at least one block in a real-world ledger had a stored hash that didn't match the v2 hash_dict logic (likely an artifact of a v2 hash_dict shape change). Added `--force` flag to cortex-migrate that proceeds despite hash mismatches; mismatched blocks are re-hashed in v3 form and the original stored hash is recorded in MIGRATION.json. Strict-mode (default) still refuses, preserving safety for ledgers without known issues.
+- **Missing content_hash in v2 reinforcements.json**: early v2's reinforcements file stored only `{category, confidence, outcome_count, last_updated, content}` — no content_hash. cortex-migrate now computes content_hash from content via `compute_content_hash` when absent, so the v3 ledger has stable doc IDs for BM25 indexing in cortex-dream.
+
+### Migration impact
+A real-world v2 global ledger (35 learnings) that v0.3.4 refused now migrates cleanly with `cortex-migrate --from ~/.claude/ledger --to ~/.claude/cortex/global-ledger --force`. Subsequent `cortex-dream` produced a 35-node graph with 110 BM25 edges, 11 eigenmodes, dominant subspace correctly clustering peptide-docking / PyRosetta / binder-optimization content.
+
 ## [0.3.4] — 2026-05-07
 
 Two introspection-found bugs from real plugin usage. Skills now actually load (the v0.3.1 fix was necessary but not sufficient — `allowed-tools` was the wrong field, but the explicit `skills` array itself is also a problem). SessionEnd hook stops failing schema validation.
