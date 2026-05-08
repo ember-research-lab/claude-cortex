@@ -260,7 +260,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cortex-active-memory"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -295,7 +295,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-dream"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -328,7 +328,10 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "cortex-active-memory",
  "cortex-core",
+ "cortex-similarity",
+ "cortex-spectral",
  "rmcp",
  "schemars",
  "serde",
@@ -353,7 +356,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-monitor"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -368,7 +371,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-similarity"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "cortex-core",
@@ -380,7 +383,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-spectral"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "cortex-core",
