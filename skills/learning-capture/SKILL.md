@@ -1,7 +1,7 @@
 ---
 name: learning-capture
 description: Capture insights to the cortex ledger via the tag_learning MCP tool. Use for discoveries, decisions, errors, and patterns worth remembering for the next session. Triggers on "tag this", "remember this", "save learning", "capture this", "worth remembering", "store this insight", "log this discovery", "note this for next time", "add to ledger", "persist this".
-version: 0.3.5
+version: 0.3.6
 ---
 
 # Learning Capture
