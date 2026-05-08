@@ -36,7 +36,14 @@ pub struct DreamReport {
     pub entries: usize,
     pub active_snapshot: PathBuf,
     pub spectrum_snapshot: PathBuf,
+    /// Trajectory classification across the spectrum-history window.
+    /// Indeterminate until ≥3 snapshots have been recorded.
+    pub trajectory: cortex_monitor::QualitativeState,
 }
+
+const CONVERGENCE_EPS: f64 = 0.01;
+const BIFURCATION_MIN_JUMP: f64 = 0.5;
+const XI_CROSS_GAP_THRESHOLD: f64 = 0.05;
 
 pub fn run(
     ledger_path: &Path,
@@ -87,6 +94,15 @@ pub fn run(
         spectrum.timestamp.replace(':', "-")
     ));
 
+    // Step 7: classify the trajectory across the spectrum history window.
+    let history = cortex_monitor::load_history(state_path)?;
+    let trajectory = cortex_monitor::classify_trajectory(
+        &history,
+        CONVERGENCE_EPS,
+        BIFURCATION_MIN_JUMP,
+        XI_CROSS_GAP_THRESHOLD,
+    );
+
     Ok(DreamReport {
         n_nodes: graph.n(),
         n_edges: graph.edges.len(),
@@ -95,5 +111,6 @@ pub fn run(
         entries: active.entries.len(),
         active_snapshot,
         spectrum_snapshot,
+        trajectory,
     })
 }

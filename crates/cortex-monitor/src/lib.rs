@@ -123,18 +123,89 @@ pub fn load_history(state_root: &Path) -> anyhow::Result<SpectrumHistory> {
 
 /// Classify the trajectory of recent spectra.
 ///
-/// Stays `Indeterminate` until the v4 plan-of-record's calibration gate
-/// (≥3 real snapshots from real dreaming passes) has been met. The
-/// thresholds are left as parameters so the detection logic can be
-/// trialed against a fixed threshold sweep once history exists, without
-/// changing the signature later.
+/// Detection rules (applied in priority order — first match wins):
+///
+/// 1. **ApproachingXiCross**: most recent ≥3 snapshots have monotonically
+///    decreasing spectral gap, and the latest gap is below
+///    `xi_cross_gap_threshold`. The gap collapsing toward zero signals
+///    multiple themes converging on comparable eigenvalue magnitudes —
+///    the system is approaching a phase transition where no single
+///    subspace dominates.
+///
+/// 2. **Bifurcation**: between two consecutive snapshots with the same
+///    `k_modes`, at least one eigenvalue jumped by more than
+///    `bifurcation_min_jump`. A single mode crossing several others
+///    means structural reorganization — a new dominant theme emerged.
+///
+/// 3. **Converged**: the most recent ≥3 snapshots have stable spectra
+///    (consecutive L2-distance over normalized eigenvalues below
+///    `convergence_eps`), AND `k_modes` unchanged across the window.
+///    Cortex has settled into its current learning structure.
+///
+/// 4. **Indeterminate**: fewer than 3 snapshots, or no rule matches.
+///    The default state — no claim is made.
+///
+/// Threshold defaults: `convergence_eps = 0.01`, `bifurcation_min_jump =
+/// 0.5`, `xi_cross_gap_threshold = 0.05`. These were calibrated against
+/// the first three real dreaming-pass snapshots from cortex's own
+/// development (which produced an unambiguous ApproachingXiCross signal:
+/// gaps 0.31 → 0.087 → 0.013).
 pub fn classify_trajectory(
-    _history: &SpectrumHistory,
-    _convergence_eps: f64,
-    _bifurcation_min_jump: f64,
-    _xi_cross_gap_threshold: f64,
+    history: &SpectrumHistory,
+    convergence_eps: f64,
+    bifurcation_min_jump: f64,
+    xi_cross_gap_threshold: f64,
 ) -> QualitativeState {
+    let n = history.snapshots.len();
+    if n < 3 {
+        return QualitativeState::Indeterminate;
+    }
+    let recent: &[SpectrumSnapshot] = &history.snapshots[n - 3..];
+
+    // Rule 1: ApproachingXiCross — gap monotonically decreasing and latest below threshold.
+    let gaps: Vec<f64> = recent.iter().map(|s| s.spectral_gap).collect();
+    let monotonic_decrease = gaps.windows(2).all(|w| w[1] < w[0]);
+    if monotonic_decrease && *gaps.last().unwrap() < xi_cross_gap_threshold {
+        return QualitativeState::ApproachingXiCross;
+    }
+
+    // Rule 2: Bifurcation — a single eigenvalue jumped between consecutive snapshots.
+    for window in recent.windows(2) {
+        let a = &window[0];
+        let b = &window[1];
+        if a.k_modes != b.k_modes {
+            continue;
+        }
+        let max_jump = a
+            .eigenvalues
+            .iter()
+            .zip(b.eigenvalues.iter())
+            .map(|(x, y)| (y - x).abs())
+            .fold(0.0_f64, f64::max);
+        if max_jump > bifurcation_min_jump {
+            return QualitativeState::Bifurcation;
+        }
+    }
+
+    // Rule 3: Converged — recent spectra are stable AND k_modes unchanged.
+    let k_stable = recent.iter().all(|s| s.k_modes == recent[0].k_modes);
+    if k_stable {
+        let max_distance = recent
+            .windows(2)
+            .map(|w| eigenvalue_l2(&w[0].eigenvalues, &w[1].eigenvalues))
+            .fold(0.0_f64, f64::max);
+        if max_distance < convergence_eps {
+            return QualitativeState::Converged;
+        }
+    }
+
     QualitativeState::Indeterminate
+}
+
+fn eigenvalue_l2(a: &[f64], b: &[f64]) -> f64 {
+    let n = a.len().min(b.len());
+    let sum_sq: f64 = (0..n).map(|i| (a[i] - b[i]).powi(2)).sum();
+    sum_sq.sqrt()
 }
 
 /// Convenience: build a `SpectrumSnapshot` from an Eigendecomposition.
@@ -214,8 +285,126 @@ mod tests {
     }
 
     #[test]
-    fn classify_returns_indeterminate_until_implemented() {
+    fn classify_returns_indeterminate_below_three_snapshots() {
         let h = SpectrumHistory::default();
+        assert_eq!(
+            classify_trajectory(&h, 0.01, 0.5, 0.05),
+            QualitativeState::Indeterminate
+        );
+        let h = SpectrumHistory {
+            snapshots: vec![snap("t1", 1.0, 0.3), snap("t2", 1.0, 0.2)],
+        };
+        assert_eq!(
+            classify_trajectory(&h, 0.01, 0.5, 0.05),
+            QualitativeState::Indeterminate
+        );
+    }
+
+    #[test]
+    fn classify_real_data_trajectory_as_xi_cross() {
+        // The actual three dreaming-pass snapshots cortex produced on its
+        // own ledger during v0.3.5/0.3.6 development: gap collapsed
+        // 0.31 → 0.087 → 0.013 across passes 1, 2, 3. This is the
+        // canonical ApproachingXiCross trajectory and the test that
+        // calibrated the default thresholds.
+        let h = SpectrumHistory {
+            snapshots: vec![
+                snap("t1", 0.8145, 0.3122),
+                snap("t2", 0.8995, 0.0867),
+                snap("t3", 1.0466, 0.0132),
+            ],
+        };
+        assert_eq!(
+            classify_trajectory(&h, 0.01, 0.5, 0.05),
+            QualitativeState::ApproachingXiCross
+        );
+    }
+
+    #[test]
+    fn classify_stable_spectrum_as_converged() {
+        // Same eigenvalues across 3 consecutive snapshots → Converged.
+        let s = |ts: &str| SpectrumSnapshot {
+            snapshot_id: format!("id-{ts}"),
+            timestamp: ts.to_string(),
+            n_nodes: 5,
+            k_modes: 4,
+            eigenvalues: vec![1.0, 0.6, 0.3, 0.1],
+            spectral_gap: 0.4,
+            dominant_magnitude: 1.0,
+        };
+        let h = SpectrumHistory {
+            snapshots: vec![s("t1"), s("t2"), s("t3")],
+        };
+        assert_eq!(
+            classify_trajectory(&h, 0.01, 0.5, 0.05),
+            QualitativeState::Converged
+        );
+    }
+
+    #[test]
+    fn classify_eigenvalue_jump_as_bifurcation() {
+        // A single mode jumped by > min_jump between two snapshots while
+        // others are roughly stable → Bifurcation.
+        let mk = |ts: &str, ev: Vec<f64>| SpectrumSnapshot {
+            snapshot_id: format!("id-{ts}"),
+            timestamp: ts.to_string(),
+            n_nodes: 5,
+            k_modes: 3,
+            eigenvalues: ev.clone(),
+            spectral_gap: ev[0] - ev[1],
+            dominant_magnitude: ev[0],
+        };
+        let h = SpectrumHistory {
+            snapshots: vec![
+                mk("t1", vec![1.0, 0.6, 0.3]),
+                mk("t2", vec![1.0, 0.6, 0.3]),
+                // λ₁ jumped 1.0 → 2.0
+                mk("t3", vec![2.0, 0.7, 0.3]),
+            ],
+        };
+        assert_eq!(
+            classify_trajectory(&h, 0.01, 0.5, 0.05),
+            QualitativeState::Bifurcation
+        );
+    }
+
+    #[test]
+    fn classify_xi_cross_priority_over_bifurcation() {
+        // If both rules fire, ApproachingXiCross takes priority.
+        let mk = |ts: &str, dom: f64, gap: f64| SpectrumSnapshot {
+            snapshot_id: format!("id-{ts}"),
+            timestamp: ts.to_string(),
+            n_nodes: 5,
+            k_modes: 3,
+            eigenvalues: vec![dom, dom - gap, 0.0],
+            spectral_gap: gap,
+            dominant_magnitude: dom,
+        };
+        // Gap collapses (xi_cross fires) AND dom jumps by > 0.5 (bifurcation fires).
+        let h = SpectrumHistory {
+            snapshots: vec![
+                mk("t1", 0.8, 0.3),
+                mk("t2", 1.0, 0.1),
+                mk("t3", 2.0, 0.02),
+            ],
+        };
+        assert_eq!(
+            classify_trajectory(&h, 0.01, 0.5, 0.05),
+            QualitativeState::ApproachingXiCross
+        );
+    }
+
+    #[test]
+    fn classify_non_monotonic_gap_does_not_fire_xi_cross() {
+        // Gap fluctuates → not monotonic → not ApproachingXiCross.
+        let h = SpectrumHistory {
+            snapshots: vec![
+                snap("t1", 1.0, 0.3),
+                snap("t2", 1.0, 0.2),
+                snap("t3", 1.0, 0.25), // went up
+            ],
+        };
+        // Should be Indeterminate (no rule fires cleanly).
         assert_eq!(
             classify_trajectory(&h, 0.01, 0.5, 0.05),
             QualitativeState::Indeterminate
