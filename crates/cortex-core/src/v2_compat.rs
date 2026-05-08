@@ -65,6 +65,7 @@ pub fn format_python_iso(dt: &DateTime<Utc>) -> String {
 ///   - For tz-aware datetimes (Pydantic `Z` form), this produces `+00:00`.
 ///   - For naive datetimes (early v2 ledger bug), this produces the naive
 ///     form unchanged.
+///
 /// So: `Z` → `+00:00`; naive → naive (passthrough).
 pub fn canonical_hash_timestamp(s: &str) -> String {
     if let Some(prefix) = s.strip_suffix('Z') {
