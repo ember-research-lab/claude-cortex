@@ -255,11 +255,15 @@ mod tests {
     use tempfile::TempDir;
 
     fn input_with(session: &str, extra: Value) -> (HookInput, ToolEvent) {
-        let mut i = HookInput::default();
-        i.session_id = Some(session.to_string());
-        if let Value::Object(map) = extra.clone() {
-            i.extra = map;
-        }
+        let extra_map = match extra.clone() {
+            Value::Object(map) => map,
+            _ => Default::default(),
+        };
+        let i = HookInput {
+            session_id: Some(session.to_string()),
+            extra: extra_map,
+            ..Default::default()
+        };
         let event: ToolEvent = serde_json::from_value(extra).unwrap_or_default();
         (i, event)
     }
