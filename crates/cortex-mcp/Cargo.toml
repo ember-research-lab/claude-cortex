@@ -14,6 +14,8 @@ path = "src/main.rs"
 
 [dependencies]
 cortex-core.workspace = true
+cortex-similarity.workspace = true
+cortex-active-memory.workspace = true
 rmcp.workspace = true
 tokio.workspace = true
 serde.workspace = true
@@ -26,3 +28,4 @@ chrono.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+cortex-spectral.workspace = true
