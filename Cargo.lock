@@ -270,6 +270,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -304,6 +305,8 @@ dependencies = [
  "cortex-monitor",
  "cortex-similarity",
  "cortex-spectral",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]
@@ -360,6 +363,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
+ "uuid",
 ]
 
 [[package]]
