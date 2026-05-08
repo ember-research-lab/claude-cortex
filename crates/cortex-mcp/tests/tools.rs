@@ -260,7 +260,10 @@ async fn tag_handoff_then_get_handoff_round_trips() {
         .await
         .unwrap();
     assert_eq!(read_back["handoff"]["session_id"], "session-xyz");
-    assert_eq!(read_back["handoff"]["pending_tasks"][0], "wire handoff substrate");
+    assert_eq!(
+        read_back["handoff"]["pending_tasks"][0],
+        "wire handoff substrate"
+    );
     assert!(read_back["handoff"]["context_notes"]
         .as_str()
         .unwrap()

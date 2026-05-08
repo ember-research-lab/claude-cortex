@@ -639,8 +639,7 @@ pub async fn tag_handoff(server: &CortexServer, args: TagHandoffArgs) -> anyhow:
 
 // ===== deferred tools (substrate not yet ported) =====
 
-const DEFERRED_NOTE: &str =
-    "Feature pending v3.x port. v3 ships with the ledger substrate; the \
+const DEFERRED_NOTE: &str = "Feature pending v3.x port. v3 ships with the ledger substrate; the \
      entity graph and cross-project recommender are scheduled for \
      follow-on releases. v4's spectral retrieval (cortex-spectral crate) \
      subsumes much of this surface area.";
