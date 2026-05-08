@@ -56,6 +56,7 @@ fn main() -> anyhow::Result<()> {
         "  spectrum snapshot:     {}",
         report.spectrum_snapshot.display()
     );
+    eprintln!("  trajectory:            {:?}", report.trajectory);
     Ok(())
 }
 
