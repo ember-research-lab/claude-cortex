@@ -245,7 +245,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cortex-core"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "anyhow",
  "base64",
@@ -265,7 +265,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-hooks"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "anyhow",
  "chrono",
@@ -277,7 +277,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-mcp"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "anyhow",
  "chrono",
@@ -294,7 +294,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-migrate"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "anyhow",
  "chrono",

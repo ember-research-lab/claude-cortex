@@ -4,6 +4,22 @@ All notable changes to claude-cortex are documented here. Format follows [Keep a
 
 ## [Unreleased]
 
+## [0.3.6] — 2026-05-08
+
+Pattern-vs-state filter at write-time. Surfaced from a real-data audit of chat-distilled learnings: ~43% failure rate on snippet-only distillation, with state-shaped distillations failing far more often than pattern-shaped ones because their surface form looks specific (numbers, file counts, draft versions) without binding to enduring structure.
+
+### Changed
+- **`cortex-orientation` skill** now includes an explicit "Pattern vs state" section. Before calling `tag_learning`, the agent must answer: *will this still be true in a year?* Patterns / frameworks / decisions go in the ledger; current state snapshots (file counts, draft versions, current params) belong in the handoff layer or session notes, NOT the long-term ledger. Substrate-inviolability means a tagged learning is immutable; state-shaped learnings rot in a way the format wasn't designed for.
+- **`post_tool_use` hook directive** rewritten with two filters: (1) pattern-not-state, (2) context-not-snippet. Cites the measured ~43% failure rate so the agent has data backing the discipline. The previous wording ("non-obvious about this codebase, an external API, or a reusable pattern") was too forgiving — it accepted state-shaped surface text.
+
+### Why this matters
+The chat-search MCP integration tested in this cycle exposed both failure modes (state-shaped tagging + snippet-only distillation). The fix lands at the cheapest layer (write-time prompt-side guidance) rather than at runtime (validation in tag_learning would require an LLM judge — too expensive). cortex's existing `record_outcome` mechanism gives weak self-correction (state-shaped learnings will fade as their facts age and outcomes can't reconfirm them), but explicit write-time guidance is much cheaper than waiting for organic decay.
+
+### Hook over-firing observations (deferred to v0.3.7)
+- Parallel external-MCP calls produce N simultaneous nudges. Deduplicate same-tool-name nudges within a batch window.
+- Same generic wording on every external-MCP tool regardless of result content. Per-tool-family wording (chat-search → "prior context worth surfacing", web fetch → "external API/docs", default → current).
+- Hook fires regardless of result content; needs result-aware firing to skip e.g. zero-hit searches.
+
 ## [0.3.5] — 2026-05-08
 
 cortex-migrate fixes surfaced from migrating a real v2 global ledger (35 learnings, 6 blocks). v0.3.4 cortex-migrate refused to touch ledgers that had any of three real-world quirks; v0.3.5 handles them.
