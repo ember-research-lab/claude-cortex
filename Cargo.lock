@@ -260,7 +260,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cortex-active-memory"
-version = "0.3.6"
+version = "0.4.0-rc1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -275,7 +275,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-core"
-version = "0.3.6"
+version = "0.4.0-rc1"
 dependencies = [
  "anyhow",
  "base64",
@@ -295,7 +295,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-dream"
-version = "0.3.6"
+version = "0.4.0-rc1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -310,8 +310,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "cortex-handoff"
+version = "0.4.0-rc1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "cortex-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "cortex-hooks"
-version = "0.3.6"
+version = "0.4.0-rc1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -323,13 +337,14 @@ dependencies = [
 
 [[package]]
 name = "cortex-mcp"
-version = "0.3.6"
+version = "0.4.0-rc1"
 dependencies = [
  "anyhow",
  "chrono",
  "clap",
  "cortex-active-memory",
  "cortex-core",
+ "cortex-handoff",
  "cortex-similarity",
  "cortex-spectral",
  "rmcp",
@@ -343,7 +358,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-migrate"
-version = "0.3.6"
+version = "0.4.0-rc1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -356,7 +371,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-monitor"
-version = "0.3.6"
+version = "0.4.0-rc1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -371,7 +386,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-similarity"
-version = "0.3.6"
+version = "0.4.0-rc1"
 dependencies = [
  "anyhow",
  "cortex-core",
@@ -383,7 +398,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-spectral"
-version = "0.3.6"
+version = "0.4.0-rc1"
 dependencies = [
  "anyhow",
  "cortex-core",

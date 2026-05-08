@@ -10,14 +10,15 @@ members = [
     "crates/cortex-active-memory",
     "crates/cortex-monitor",
     "crates/cortex-dream",
+    "crates/cortex-handoff",
 ]
 
 [workspace.package]
-version = "0.3.6"
+version = "0.4.0-rc1"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT"
-authors = ["Claude Cortex Contributors"]
+authors = ["Ember Research Lab <emberresearchlab@gmail.com>"]
 repository = "https://github.com/ember-research-lab/claude-cortex"
 homepage = "https://github.com/ember-research-lab/claude-cortex"
 description = "Persistent memory that makes Claude Code smarter across sessions"
@@ -70,6 +71,7 @@ cortex-similarity = { path = "crates/cortex-similarity" }
 cortex-spectral = { path = "crates/cortex-spectral" }
 cortex-active-memory = { path = "crates/cortex-active-memory" }
 cortex-monitor = { path = "crates/cortex-monitor" }
+cortex-handoff = { path = "crates/cortex-handoff" }
 
 # Filesystem helpers
 tempfile = "3"

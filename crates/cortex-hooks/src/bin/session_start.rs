@@ -1,14 +1,28 @@
 //! `cortex-session-start` — fired at the start of every Claude Code session.
 //!
-//! Surfaces top-confidence learnings from project + global ledgers (no
-//! truncation, per the v3 spec) and prefixes a directive instructing the
-//! agent to scan them for applicability before responding to the user.
+//! v0.4.0: orientation skill content is INJECTED directly via the
+//! SessionStart hook. This decouples orientation availability from the
+//! Skill-tool surfacing mechanism (which depends on plugin-loader
+//! discovery quirks and trigger-phrase matching). The cortex-orientation
+//! SKILL.md remains the single source of truth — it's embedded via
+//! `include_str!` at compile time, so the hook output and the skill
+//! body can never drift.
+//!
+//! Output structure (in order):
+//!   1. Cortex Orientation directives (full skill body)
+//!   2. Prior Knowledge from Cortex Ledger (top learnings + confidence
+//!      interpretation)
 
 use cortex_hooks::{collect_top_learnings, project_dir, read_input, write_output};
 
 const PROJECT_MIN_CONF: f64 = 0.7;
 const GLOBAL_MIN_CONF: f64 = 0.8;
 const TOP_K: usize = 8;
+
+/// Full cortex-orientation skill body, embedded at compile time. Single
+/// source of truth: edit `skills/cortex-orientation/SKILL.md` and the
+/// hook picks up the change on next rebuild.
+const ORIENTATION_SKILL: &str = include_str!("../../../../skills/cortex-orientation/SKILL.md");
 
 fn main() {
     let input = read_input();
@@ -19,9 +33,39 @@ fn main() {
 }
 
 fn build_context(learnings: &[cortex_hooks::ScoredLearning]) -> String {
-    if learnings.is_empty() {
-        return String::new();
+    let mut sections: Vec<String> = Vec::new();
+    sections.push(orientation_block());
+    if !learnings.is_empty() {
+        sections.push(learnings_block(learnings));
     }
+    sections.join("\n\n")
+}
+
+fn orientation_block() -> String {
+    // Strip the SKILL.md YAML frontmatter — keep only the body, since the
+    // YAML keys (name/description/version) are metadata, not directives.
+    let body = strip_frontmatter(ORIENTATION_SKILL);
+    let mut out = String::new();
+    out.push_str("# Cortex Orientation (auto-loaded)\n\n");
+    out.push_str(
+        "These directives establish how cortex-equipped sessions operate. They \
+         are loaded automatically at session start; you do not need to invoke \
+         them via the Skill tool.\n\n",
+    );
+    out.push_str(body.trim());
+    out
+}
+
+fn strip_frontmatter(src: &str) -> &str {
+    if let Some(rest) = src.strip_prefix("---\n") {
+        if let Some(end) = rest.find("\n---\n") {
+            return &rest[end + 5..];
+        }
+    }
+    src
+}
+
+fn learnings_block(learnings: &[cortex_hooks::ScoredLearning]) -> String {
     let mut lines: Vec<String> = vec![
         "# Prior Knowledge from Cortex Ledger".to_string(),
         String::new(),
