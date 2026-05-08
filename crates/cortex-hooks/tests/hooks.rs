@@ -183,10 +183,7 @@ fn post_tool_use_emits_for_substantive_tools() {
         "cortex-post-tool-use",
         &[
             ("HOME", home.path()),
-            (
-                "CORTEX_HOOK_DEDUP_PATH",
-                std::path::Path::new(&dedup),
-            ),
+            ("CORTEX_HOOK_DEDUP_PATH", std::path::Path::new(&dedup)),
         ],
         &stdin,
     );
@@ -197,7 +194,11 @@ fn post_tool_use_emits_for_substantive_tools() {
     assert!(context.contains("WebFetch"));
     assert!(context.contains("tag_handoff"));
     // Compressed (v0.4.0) — much shorter than the v0.3.7 directive.
-    assert!(context.len() < 600, "directive grew to {} chars", context.len());
+    assert!(
+        context.len() < 600,
+        "directive grew to {} chars",
+        context.len()
+    );
 }
 
 #[test]
@@ -213,10 +214,7 @@ fn post_tool_use_suppresses_zero_hit_searches() {
         "cortex-post-tool-use",
         &[
             ("HOME", home.path()),
-            (
-                "CORTEX_HOOK_DEDUP_PATH",
-                std::path::Path::new(&dedup),
-            ),
+            ("CORTEX_HOOK_DEDUP_PATH", std::path::Path::new(&dedup)),
         ],
         &stdin,
     );

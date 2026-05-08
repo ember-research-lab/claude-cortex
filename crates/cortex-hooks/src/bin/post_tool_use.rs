@@ -123,9 +123,7 @@ fn response_is_uninformative(response: &Value) -> bool {
         Value::Object(map) => {
             // Top-level error payload — typical MCP shape.
             if let Some(err) = map.get("error") {
-                if !err.is_null()
-                    && !err.as_str().unwrap_or("").trim().is_empty()
-                {
+                if !err.is_null() && !err.as_str().unwrap_or("").trim().is_empty() {
                     return true;
                 }
             }
@@ -246,9 +244,7 @@ fn record_fire(path: &std::path::Path, tool: &str, session: Option<&str>) {
     state.entries.insert(dedup_key(tool, session), now);
     // Prune stale entries (>1 hour) on each write so the file doesn't
     // grow unbounded across long-lived sessions.
-    state
-        .entries
-        .retain(|_, ts| now.saturating_sub(*ts) < 3600);
+    state.entries.retain(|_, ts| now.saturating_sub(*ts) < 3600);
     let _ = write_state(path, &state);
 }
 
@@ -277,8 +273,17 @@ mod tests {
     #[test]
     fn routine_tools_are_silent() {
         for t in [
-            "Read", "Write", "Edit", "MultiEdit", "Bash", "Glob", "Grep",
-            "TodoWrite", "TaskCreate", "TaskUpdate", "ToolSearch",
+            "Read",
+            "Write",
+            "Edit",
+            "MultiEdit",
+            "Bash",
+            "Glob",
+            "Grep",
+            "TodoWrite",
+            "TaskCreate",
+            "TaskUpdate",
+            "ToolSearch",
             "NotebookEdit",
         ] {
             assert!(classify(t).is_none(), "expected silence on {t}");
@@ -318,9 +323,7 @@ mod tests {
 
     #[test]
     fn error_payload_suppresses() {
-        assert!(response_is_uninformative(
-            &json!({"error": "rate limited"})
-        ));
+        assert!(response_is_uninformative(&json!({"error": "rate limited"})));
     }
 
     #[test]
@@ -363,7 +366,10 @@ mod tests {
         let first = build_directive(&input, &event, Some(&path));
         assert!(!first.is_empty(), "first call should fire");
         let second = build_directive(&input, &event, Some(&path));
-        assert!(second.is_empty(), "second call within window should suppress");
+        assert!(
+            second.is_empty(),
+            "second call within window should suppress"
+        );
     }
 
     #[test]

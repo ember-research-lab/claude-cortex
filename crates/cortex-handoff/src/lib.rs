@@ -181,10 +181,7 @@ pub fn list_handoffs(state_root: &Path) -> anyhow::Result<Vec<Handoff>> {
                     path.display()
                 ),
             },
-            Err(e) => eprintln!(
-                "cortex-handoff: cannot read {}: {e}",
-                path.display()
-            ),
+            Err(e) => eprintln!("cortex-handoff: cannot read {}: {e}", path.display()),
         }
     }
     Ok(out)
@@ -193,10 +190,7 @@ pub fn list_handoffs(state_root: &Path) -> anyhow::Result<Vec<Handoff>> {
 /// Find the most-recent handoff for a specific session_id. Useful for
 /// resuming a specific prior session by id, vs the global `current`
 /// which is the latest handoff regardless of session.
-pub fn latest_for_session(
-    state_root: &Path,
-    session_id: &str,
-) -> anyhow::Result<Option<Handoff>> {
+pub fn latest_for_session(state_root: &Path, session_id: &str) -> anyhow::Result<Option<Handoff>> {
     let all = list_handoffs(state_root)?;
     Ok(all.into_iter().rev().find(|h| h.session_id == session_id))
 }
@@ -285,11 +279,7 @@ mod tests {
         )
         .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(2));
-        record_handoff(
-            dir.path(),
-            &Handoff::new("beta").with_context("first beta"),
-        )
-        .unwrap();
+        record_handoff(dir.path(), &Handoff::new("beta").with_context("first beta")).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(2));
         record_handoff(
             dir.path(),

@@ -382,11 +382,7 @@ mod tests {
         };
         // Gap collapses (xi_cross fires) AND dom jumps by > 0.5 (bifurcation fires).
         let h = SpectrumHistory {
-            snapshots: vec![
-                mk("t1", 0.8, 0.3),
-                mk("t2", 1.0, 0.1),
-                mk("t3", 2.0, 0.02),
-            ],
+            snapshots: vec![mk("t1", 0.8, 0.3), mk("t2", 1.0, 0.1), mk("t3", 2.0, 0.02)],
         };
         assert_eq!(
             classify_trajectory(&h, 0.01, 0.5, 0.05),
