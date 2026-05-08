@@ -97,6 +97,33 @@ fn effective_confidence(reinforcement: &Reinforcement) -> f64 {
     )
 }
 
+/// Effective confidence with spectral fallback: if `active` is present
+/// and the learning is in its top-k entries, use `spectral_confidence`
+/// (normalized projection_weight). Otherwise fall back to scalar v3
+/// confidence with 180-day decay. v4's substrate-inviolability principle
+/// applied: scalar values are still recorded on writes; spectral values
+/// only override at READ time when an active-memory snapshot exists.
+fn confidence_with_spectral(
+    reinforcement: &Reinforcement,
+    learning_id: &str,
+    active: Option<&cortex_active_memory::ActiveMemory>,
+) -> f64 {
+    if let Some(snapshot) = active {
+        if let Some(spectral) = cortex_active_memory::spectral_confidence(snapshot, learning_id) {
+            return spectral;
+        }
+    }
+    effective_confidence(reinforcement)
+}
+
+/// Resolve the active-memory snapshot for a given ledger path, if one
+/// exists. State directory is `<ledger>/cortex-state/` (matches what
+/// cortex-dream writes).
+fn load_active_memory(ledger_path: &std::path::Path) -> Option<cortex_active_memory::ActiveMemory> {
+    let state = ledger_path.join("cortex-state");
+    cortex_active_memory::read_current(&state).ok().flatten()
+}
+
 fn shortid(id: &str) -> String {
     id.chars().take(8).collect()
 }
@@ -151,59 +178,114 @@ pub async fn search_learnings(
         Some(c) => Some(parse_category(c)?),
         None => None,
     };
-    let Some((_, reinforcements)) =
-        ledger_with_reinforcements(server, args.project_dir.as_deref())?
-    else {
+    let Some(path) = resolve_ledger(server, args.project_dir.as_deref())? else {
         return Ok(json!({"results": [], "total": 0, "error": null}));
     };
-    let needle = args.query.to_lowercase();
-    let mut hits = Vec::new();
-    for (id, r) in &reinforcements.learnings {
-        if let Some(filter) = category_filter {
-            if r.category != filter {
+    let Some(_) = open_ledger(&path)? else {
+        return Ok(json!({"results": [], "total": 0, "error": null}));
+    };
+    let active = load_active_memory(&path);
+    let reinforcements = {
+        let ledger = Ledger::open(&path)?;
+        ledger.read_reinforcements()?
+    };
+
+    // Phase 7: spectral retrieval if active memory exists. Otherwise the
+    // v3 substring path.
+    let mut scored: Vec<(String, Reinforcement, f64, f64, &'static str)> = Vec::new();
+    if let Some(snapshot) = &active {
+        // Build a BM25 index over the corpus and score the query against it.
+        let mut bm25 = cortex_similarity::Bm25Index::new();
+        for r in reinforcements.learnings.values() {
+            bm25.add(r.content_hash.clone(), &r.content);
+        }
+        bm25.recompute_stats();
+        let query_scores: std::collections::HashMap<String, f64> =
+            bm25.score_query(&args.query).into_iter().collect();
+        let ranked = cortex_active_memory::spectral_query(snapshot, |node_id| {
+            query_scores.get(&node_id.0).copied().unwrap_or(0.0)
+        });
+        for (entry, resonance) in ranked {
+            // Find this entry's reinforcement by learning_id.
+            let Some((id, r)) = reinforcements
+                .learnings
+                .iter()
+                .find(|(id, _)| id.as_str() == entry.learning_id)
+            else {
+                continue;
+            };
+            if let Some(filter) = category_filter {
+                if r.category != filter {
+                    continue;
+                }
+            }
+            let conf = confidence_with_spectral(r, id, active.as_ref());
+            if conf < args.min_confidence {
                 continue;
             }
+            scored.push((id.clone(), r.clone(), conf, resonance, "spectral"));
         }
-        if !needle.is_empty() && !r.content.to_lowercase().contains(&needle) {
-            continue;
+    } else {
+        let needle = args.query.to_lowercase();
+        for (id, r) in &reinforcements.learnings {
+            if let Some(filter) = category_filter {
+                if r.category != filter {
+                    continue;
+                }
+            }
+            if !needle.is_empty() && !r.content.to_lowercase().contains(&needle) {
+                continue;
+            }
+            let conf = effective_confidence(r);
+            if conf < args.min_confidence {
+                continue;
+            }
+            scored.push((id.clone(), r.clone(), conf, 0.0, "substring"));
         }
-        let conf = effective_confidence(r);
-        if conf < args.min_confidence {
-            continue;
-        }
-        hits.push((id.clone(), r.clone(), conf));
+        scored.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
     }
-    hits.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
-    hits.truncate(args.limit);
-    let results: Vec<Value> = hits
+    scored.truncate(args.limit);
+    let mode = scored
+        .first()
+        .map(|(_, _, _, _, m)| *m)
+        .unwrap_or("substring");
+    let results: Vec<Value> = scored
         .iter()
         .enumerate()
-        .map(|(rank, (id, r, conf))| {
+        .map(|(rank, (id, r, conf, resonance, _))| {
             let snippet: String = r.content.chars().take(150).collect();
-            json!({
+            let mut entry = json!({
                 "id": shortid(id),
                 "full_id": id,
                 "snippet": snippet,
                 "category": category_value(r.category),
                 "confidence": round2(*conf),
                 "rank": rank,
-            })
+            });
+            if mode == "spectral" {
+                entry["resonance"] = json!(round2(*resonance));
+            }
+            entry
         })
         .collect();
     Ok(json!({
         "query": args.query,
         "category": args.category,
+        "mode": mode,
         "results": results,
         "total": results.len(),
     }))
 }
 
 pub async fn get_learning(server: &CortexServer, args: GetLearningArgs) -> anyhow::Result<Value> {
-    let Some((ledger, reinforcements)) =
-        ledger_with_reinforcements(server, args.project_dir.as_deref())?
-    else {
+    let Some(path) = resolve_ledger(server, args.project_dir.as_deref())? else {
         return Ok(json!({"error": "Ledger not found"}));
     };
+    let Some(ledger) = open_ledger(&path)? else {
+        return Ok(json!({"error": "Ledger not found"}));
+    };
+    let active = load_active_memory(&path);
+    let reinforcements = ledger.read_reinforcements()?;
     let Some((id, reinforcement)) = match_prefix(&reinforcements, &args.learning_id) else {
         return Ok(json!({
             "error": format!("Learning '{}' not found", args.learning_id)
@@ -233,8 +315,16 @@ pub async fn get_learning(server: &CortexServer, args: GetLearningArgs) -> anyho
         .unwrap_or(Value::Null);
     result.insert("created".into(), created);
     if args.show_decay {
-        let effective = effective_confidence(reinforcement);
+        let effective = confidence_with_spectral(reinforcement, id, active.as_ref());
         result.insert("effective_confidence".into(), json!(round2(effective)));
+        let mode = if active.is_some()
+            && cortex_active_memory::spectral_confidence(active.as_ref().unwrap(), id).is_some()
+        {
+            "spectral"
+        } else {
+            "scalar"
+        };
+        result.insert("confidence_mode".into(), Value::String(mode.to_string()));
         result.insert(
             "has_decayed".into(),
             Value::Bool(effective < reinforcement.confidence),
@@ -296,11 +386,14 @@ pub async fn list_learnings(
         Some(c) => Some(parse_category(c)?),
         None => None,
     };
-    let Some((_, reinforcements)) =
-        ledger_with_reinforcements(server, args.project_dir.as_deref())?
-    else {
+    let Some(path) = resolve_ledger(server, args.project_dir.as_deref())? else {
         return Ok(json!({"learnings": [], "total": 0}));
     };
+    let Some(_) = open_ledger(&path)? else {
+        return Ok(json!({"learnings": [], "total": 0}));
+    };
+    let active = load_active_memory(&path);
+    let reinforcements = Ledger::open(&path)?.read_reinforcements()?;
     let mut entries: Vec<(String, Reinforcement, f64)> = reinforcements
         .learnings
         .into_iter()
@@ -310,7 +403,7 @@ pub async fn list_learnings(
                     return None;
                 }
             }
-            let effective = effective_confidence(&r);
+            let effective = confidence_with_spectral(&r, &id, active.as_ref());
             if effective < args.min_confidence {
                 return None;
             }
@@ -319,6 +412,11 @@ pub async fn list_learnings(
         .collect();
     entries.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
     entries.truncate(args.limit);
+    let mode = if active.is_some() {
+        "spectral"
+    } else {
+        "scalar"
+    };
     let results: Vec<Value> = entries
         .into_iter()
         .map(|(id, r, effective)| {
@@ -339,6 +437,7 @@ pub async fn list_learnings(
     Ok(json!({
         "learnings": results,
         "total": results.len(),
+        "mode": mode,
     }))
 }
 
@@ -349,19 +448,20 @@ pub async fn ledger_stats(server: &CortexServer, args: LedgerStatsArgs) -> anyho
     let Some(ledger) = open_ledger(&path)? else {
         return Ok(json!({"error": "Ledger not found", "exists": false, "path": path}));
     };
+    let active = load_active_memory(&path);
     let reinforcements = ledger.read_reinforcements()?;
     let mut by_category: Map<String, Value> = Map::new();
     let mut high = 0u64;
     let mut medium = 0u64;
     let mut low = 0u64;
     let total = reinforcements.learnings.len();
-    for r in reinforcements.learnings.values() {
+    for (id, r) in &reinforcements.learnings {
         let cat_key = category_value(r.category).to_string();
         let entry = by_category.entry(cat_key).or_insert(Value::from(0u64));
         if let Some(n) = entry.as_u64() {
             *entry = Value::from(n + 1);
         }
-        let conf = effective_confidence(r);
+        let conf = confidence_with_spectral(r, id, active.as_ref());
         if conf >= 0.7 {
             high += 1;
         } else if conf >= 0.4 {
@@ -370,12 +470,18 @@ pub async fn ledger_stats(server: &CortexServer, args: LedgerStatsArgs) -> anyho
             low += 1;
         }
     }
+    let mode = if active.is_some() {
+        "spectral"
+    } else {
+        "scalar"
+    };
     Ok(json!({
         "exists": true,
         "path": path,
         "total_learnings": total,
         "by_category": Value::Object(by_category),
         "by_confidence": { "high": high, "medium": medium, "low": low },
+        "confidence_mode": mode,
     }))
 }
 
@@ -475,20 +581,68 @@ pub async fn get_session_summary(
     Ok(json!({"summaries": summaries, "total": summaries.len()}))
 }
 
-// ===== deferred tools (substrate not yet ported) =====
+// ===== handoff tools (v0.4.0) =====
 
-const DEFERRED_NOTE: &str =
-    "Feature pending v3.x port. v3 ships with the ledger substrate; entity \
-     graph, handoff store, and cross-project recommender are scheduled for \
-     follow-on releases. v4's spectral retrieval (cortex-spectral crate) \
-     subsumes much of this surface area.";
+/// Resolve the cortex-state directory for handoffs. Mirrors
+/// `load_active_memory`'s convention: `<ledger>/cortex-state/`.
+fn handoff_state_root(server: &CortexServer, project_dir: Option<&str>) -> anyhow::Result<PathBuf> {
+    let ledger = resolve_ledger(server, project_dir)?
+        .ok_or_else(|| anyhow!("no project ledger found and no global ledger available"))?;
+    Ok(ledger.join("cortex-state"))
+}
 
-pub async fn get_handoff(_server: &CortexServer, _args: GetHandoffArgs) -> anyhow::Result<Value> {
+fn handoff_to_json(h: &cortex_handoff::Handoff) -> Value {
+    json!({
+        "handoff_id": h.handoff_id,
+        "session_id": h.session_id,
+        "timestamp": h.timestamp.as_str(),
+        "completed_tasks": h.completed_tasks,
+        "pending_tasks": h.pending_tasks,
+        "blockers": h.blockers,
+        "modified_files": h.modified_files,
+        "context_notes": h.context_notes,
+    })
+}
+
+pub async fn get_handoff(server: &CortexServer, args: GetHandoffArgs) -> anyhow::Result<Value> {
+    let state_root = handoff_state_root(server, args.project_dir.as_deref())?;
+    let found = match args.session_id.as_deref() {
+        Some(sid) => cortex_handoff::latest_for_session(&state_root, sid)?,
+        None => cortex_handoff::read_current(&state_root)?,
+    };
+    match found {
+        Some(h) => Ok(json!({ "handoff": handoff_to_json(&h) })),
+        None => Ok(json!({
+            "handoff": null,
+            "note": "No handoff found. Use tag_handoff to record one at a pause-point.",
+        })),
+    }
+}
+
+pub async fn tag_handoff(server: &CortexServer, args: TagHandoffArgs) -> anyhow::Result<Value> {
+    if args.session_id.trim().is_empty() {
+        return Err(anyhow!("session_id is required and must not be empty"));
+    }
+    let state_root = handoff_state_root(server, args.project_dir.as_deref())?;
+    let handoff = cortex_handoff::Handoff::new(args.session_id)
+        .with_completed(args.completed_tasks)
+        .with_pending(args.pending_tasks)
+        .with_blockers(args.blockers)
+        .with_modified_files(args.modified_files)
+        .with_context(args.context_notes);
+    let path = cortex_handoff::record_handoff(&state_root, &handoff)?;
     Ok(json!({
-        "handoff": null,
-        "error": DEFERRED_NOTE,
+        "handoff": handoff_to_json(&handoff),
+        "stored_at": path.display().to_string(),
     }))
 }
+
+// ===== deferred tools (substrate not yet ported) =====
+
+const DEFERRED_NOTE: &str = "Feature pending v3.x port. v3 ships with the ledger substrate; the \
+     entity graph and cross-project recommender are scheduled for \
+     follow-on releases. v4's spectral retrieval (cortex-spectral crate) \
+     subsumes much of this surface area.";
 
 pub async fn get_suggestions(
     _server: &CortexServer,

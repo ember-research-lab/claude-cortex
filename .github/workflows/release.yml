@@ -109,3 +109,6 @@ jobs:
         with:
           files: artifacts/**/*
           generate_release_notes: true
+          # Auto-mark RC / alpha / beta / pre tags as prerelease so
+          # marketplace consumers don't pick them up as "latest".
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-pre') }}

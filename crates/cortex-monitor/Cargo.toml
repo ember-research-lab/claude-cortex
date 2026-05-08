@@ -1,32 +1,22 @@
 [package]
-name = "cortex-mcp"
+name = "cortex-monitor"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "MCP server exposing cortex tools over stdio (rmcp)"
-
-[[bin]]
-name = "cortex-mcp"
-path = "src/main.rs"
+description = "Self-spectral metrics — cortex observing its own learning-graph spectrum (v4)"
 
 [dependencies]
 cortex-core.workspace = true
-cortex-similarity.workspace = true
-cortex-active-memory.workspace = true
-cortex-handoff.workspace = true
-rmcp.workspace = true
-tokio.workspace = true
+cortex-spectral.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
-clap.workspace = true
-schemars.workspace = true
 chrono.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-cortex-spectral.workspace = true

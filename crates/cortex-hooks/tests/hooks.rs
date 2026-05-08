@@ -91,7 +91,7 @@ fn seed_project_ledger(dir: &Path) {
 }
 
 #[test]
-fn session_start_emits_directive_and_learnings() {
+fn session_start_emits_orientation_and_learnings() {
     let project = TempDir::new().unwrap();
     let home = TempDir::new().unwrap();
     seed_project_ledger(project.path());
@@ -105,6 +105,11 @@ fn session_start_emits_directive_and_learnings() {
     let context = out["hookSpecificOutput"]["additionalContext"]
         .as_str()
         .unwrap();
+    // Orientation block is always present (auto-injected v0.4.0).
+    assert!(context.contains("Cortex Orientation"));
+    assert!(context.contains("orchestrator"));
+    assert!(context.contains("substrate"));
+    // Ledger block is present when there are learnings.
     assert!(context.contains("Prior Knowledge"));
     assert!(context.contains("Confidence interpretation"));
     assert!(context.contains("Top Learnings"));
@@ -112,7 +117,11 @@ fn session_start_emits_directive_and_learnings() {
 }
 
 #[test]
-fn session_start_without_ledger_emits_nothing() {
+fn session_start_without_ledger_still_emits_orientation() {
+    // v0.4.0: orientation is auto-injected regardless of ledger state.
+    // Previously emitted nothing; the new contract is that orientation is
+    // always present so the agent has the operating-mode directives even
+    // on a brand-new project with no learnings yet.
     let project = TempDir::new().unwrap();
     let home = TempDir::new().unwrap();
     let stdin = serde_json::json!({
@@ -120,7 +129,12 @@ fn session_start_without_ledger_emits_nothing() {
     })
     .to_string();
     let out = run_hook("cortex-session-start", &[("HOME", home.path())], &stdin);
-    assert!(out.get("hookSpecificOutput").is_none());
+    let context = out["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .expect("orientation should always be emitted");
+    assert!(context.contains("Cortex Orientation"));
+    // No ledger learnings -> no Prior Knowledge block.
+    assert!(!context.contains("Prior Knowledge"));
 }
 
 #[test]
@@ -156,15 +170,56 @@ fn post_tool_use_skips_routine_tools() {
 
 #[test]
 fn post_tool_use_emits_for_substantive_tools() {
+    // Use a per-test dedup path so parallel test runs don't suppress
+    // each other via the shared $HOME/.cache sidecar.
     let home = TempDir::new().unwrap();
+    let dedup = home.path().join("dedup.json");
     let stdin = serde_json::json!({
         "tool_name": "WebFetch",
+        "tool_response": {"results": [{"url": "https://example.com"}]},
     })
     .to_string();
-    let out = run_hook("cortex-post-tool-use", &[("HOME", home.path())], &stdin);
+    let out = run_hook(
+        "cortex-post-tool-use",
+        &[
+            ("HOME", home.path()),
+            ("CORTEX_HOOK_DEDUP_PATH", std::path::Path::new(&dedup)),
+        ],
+        &stdin,
+    );
     let context = out["hookSpecificOutput"]["additionalContext"]
         .as_str()
         .unwrap();
-    assert!(context.contains("Discovery-Tagging Post-Condition"));
+    assert!(context.contains("Discovery-Tagging Nudge"));
     assert!(context.contains("WebFetch"));
+    assert!(context.contains("tag_handoff"));
+    // Compressed (v0.4.0) — much shorter than the v0.3.7 directive.
+    assert!(
+        context.len() < 600,
+        "directive grew to {} chars",
+        context.len()
+    );
+}
+
+#[test]
+fn post_tool_use_suppresses_zero_hit_searches() {
+    let home = TempDir::new().unwrap();
+    let dedup = home.path().join("dedup-empty.json");
+    let stdin = serde_json::json!({
+        "tool_name": "WebSearch",
+        "tool_response": {"results": []},
+    })
+    .to_string();
+    let out = run_hook(
+        "cortex-post-tool-use",
+        &[
+            ("HOME", home.path()),
+            ("CORTEX_HOOK_DEDUP_PATH", std::path::Path::new(&dedup)),
+        ],
+        &stdin,
+    );
+    assert!(
+        out.get("hookSpecificOutput").is_none(),
+        "zero-hit search should not emit a nudge"
+    );
 }

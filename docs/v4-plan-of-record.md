@@ -12,7 +12,7 @@ This doc records the defaults baked in, the order of work, and the gates that bl
 
 | Decision | Spec default | v4 default | Reason |
 |---|---|---|---|
-| Embedding source | API vs local (deferred) | **Anthropic API** | Better quality; cost amortized by content-addressed cache; latency acceptable since hooks already accept Anthropic-network round-trips. |
+| Similarity source | API vs local embeddings (deferred) | **BM25 lexical (no API, no model)** | User constraint: nothing beyond their existing Claude Code subscription. BM25 is what v2 cortex used (via SQLite FTS5); short ledger entries (≤500 chars) make lexical overlap a strong signal. Spec gates the spectral approach on resonance ≥ tag retrieval — if BM25-fed spectra fails that gate, real embeddings become a v5 question with measured evidence rather than speculation. The crate is `cortex-similarity` not `cortex-embeddings` accordingly. |
 | Edge weight composition | 0.4 / 0.4 / 0.2 | **0.4 / 0.4 / 0.2** | Spec default. Tunable from `cortex-state/active/active-*.json` records once enough dreaming passes have run. |
 | Top-k eigenmodes | 50 | **`min(50, n / 3)`** | Floors at 1, scales for small ledgers. Spec default at scale, scaled-down for small ledgers so we don't try to extract 50 modes from a 30-node graph. |
 | Dreaming trigger | Manual only | **Manual only initially** | Slash command `/cortex-dream`. Cron / session-end hook deferred until dreaming proves it adds value. |
@@ -25,7 +25,7 @@ Reordered from the spec to land introspection earlier:
 
 | # | Crate / phase | Lands before | Gate |
 |---|---|---|---|
-| 1 | `cortex-embeddings` | spectral can compute similarity | Anthropic API call works against the lab account; cache hits don't re-embed. |
+| 1 | `cortex-similarity` (BM25) | spectral can compute similarity | Pairwise similarity matrix produced for any corpus; top-k retrieval ranks lexically-relevant entries first. **Done — Phase 1 implemented.** |
 | 2 | `cortex-spectral` (graph + Laplacian + eigendecomp) | active-memory | Eigendecomposition completes for a 100-node mock graph in <1s on a laptop. |
 | 3 | `cortex-monitor` (moved earlier from spec Phase 7) | active-memory + dream | Records spectrum snapshots given a static graph. Detection logic stubbed — implementation gates on having ≥3 dreaming-pass snapshots. |
 | 4 | `cortex-active-memory` | dream | `build_active_memory(graph, eigendecomp, k)` produces a deterministic snapshot; `current` symlink updates atomically. |
@@ -42,7 +42,7 @@ crates/
 ├── cortex-mcp/               # v3, minor updates Phase 6/7
 ├── cortex-hooks/             # v3, minor updates to read from active memory
 ├── cortex-migrate/           # v3 unchanged
-├── cortex-embeddings/        # v4 NEW — Phase 1
+├── cortex-similarity/        # v4 NEW — Phase 1 (BM25)
 ├── cortex-spectral/          # v4 NEW — Phase 2
 ├── cortex-monitor/           # v4 NEW — Phase 3 (moved earlier)
 ├── cortex-active-memory/     # v4 NEW — Phase 4
@@ -70,7 +70,7 @@ crates/
 
 ## Implementation status (as of 2026-05-07)
 
-- v4 branch exists at `ember-research-lab/claude-cortex` (no commits yet beyond branchpoint at v0.3.0 + cleanup).
-- Embeddings + spectral crate scaffolds drafted and reverted from main during v0.3.1 cleanup. Need to be re-applied to the v4 branch fresh.
-- Monitor / active-memory / dream: not yet drafted.
-- This doc is the first artifact to land in v4 work.
+- v4 branch live at `ember-research-lab/claude-cortex`, caught up with main (v0.3.3).
+- All 5 v4 crate scaffolds applied: `cortex-similarity`, `cortex-spectral`, `cortex-active-memory`, `cortex-monitor`, `cortex-dream`. Workspace builds clean across 9 crates.
+- **Phase 1 (cortex-similarity) IMPLEMENTED**: hand-rolled BM25 with tokenization, IDF, score_doc/score_query/top_k/pairwise_similarity. Replaces the originally-planned cortex-embeddings (Anthropic API) per user constraint that v4 must work with nothing beyond their CC subscription. 6 unit tests cover tokenization, scoring, ranking, and IDF behavior.
+- Phases 2-5 still scaffolded only (types + stubs that bail with clear "not yet implemented" messages).

@@ -5,14 +5,20 @@ members = [
     "crates/cortex-mcp",
     "crates/cortex-hooks",
     "crates/cortex-migrate",
+    "crates/cortex-similarity",
+    "crates/cortex-spectral",
+    "crates/cortex-active-memory",
+    "crates/cortex-monitor",
+    "crates/cortex-dream",
+    "crates/cortex-handoff",
 ]
 
 [workspace.package]
-version = "0.3.6"
+version = "0.4.0-rc1"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT"
-authors = ["Claude Cortex Contributors"]
+authors = ["Ember Research Lab <emberresearchlab@gmail.com>"]
 repository = "https://github.com/ember-research-lab/claude-cortex"
 homepage = "https://github.com/ember-research-lab/claude-cortex"
 description = "Persistent memory that makes Claude Code smarter across sessions"
@@ -55,6 +61,17 @@ hex = "0.4"
 
 # JSON Schema (rmcp tool param schemas)
 schemars = { version = "1", features = ["chrono04"] }
+
+# v4 spectral layer (BM25 + sparse linear algebra; no embedding model, no API).
+nalgebra = "0.33"
+nalgebra-sparse = "0.10"
+
+# Internal v4 crates
+cortex-similarity = { path = "crates/cortex-similarity" }
+cortex-spectral = { path = "crates/cortex-spectral" }
+cortex-active-memory = { path = "crates/cortex-active-memory" }
+cortex-monitor = { path = "crates/cortex-monitor" }
+cortex-handoff = { path = "crates/cortex-handoff" }
 
 # Filesystem helpers
 tempfile = "3"
