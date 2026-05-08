@@ -1,0 +1,21 @@
+[package]
+name = "cortex-handoff"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Handoff substrate — work-in-progress state capture for cross-session continuity (state belongs here, not in the long-term ledger)"
+
+[dependencies]
+cortex-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

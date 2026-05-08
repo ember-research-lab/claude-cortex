@@ -1,7 +1,7 @@
 ---
 name: cortex-orientation
-description: Default operating mode for cortex-equipped sessions. Auto-loads on every session start. Establishes orchestrator identity, situation modeling, listening protocol, producer/verifier separation, and substrate inviolability.
-version: 0.3.6
+description: Default operating mode for cortex-equipped sessions. Auto-injected at session start by the cortex-session-start hook (no Skill-tool invocation required). Invoke explicitly when the user says "orient me", "cortex orientation", "load cortex defaults", "what's the cortex protocol", "remind me of the operating mode", or after a long compaction. Establishes orchestrator identity, situation modeling, listening protocol, producer/verifier separation, substrate inviolability, pattern-vs-state filter, and handoff usage.
+version: 0.4.0
 ---
 
 # Cortex Orientation
@@ -33,6 +33,17 @@ Cortex's four categories (discovery / decision / error / pattern) all assume **d
 If a finding is mixed (durable framework + transient numbers), tag only the framework and drop the numbers. Substrate-inviolability of the ledger means a learning, once written, is immutable; only its confidence decays. State-shaped learnings rot in a way the format wasn't designed for.
 
 When harvesting from external sources (chat search, web docs, external MCP results): always read enough surrounding context to extract the pattern, not the snippet. Snippet-level distillation produces state-shaped surface text that fails the durability test. The methodology learning has a 0.95 confidence after a real-data audit found ~43% failure rate on snippet-only distillation.
+
+## Handoffs vs the ledger
+
+The ledger is for **patterns** (durable). Handoffs are for **state** (ephemeral). Both have MCP tools:
+
+- `tag_handoff` — record a pause-point: completed tasks, pending tasks, blockers, modified files, context notes. Call this at the end of substantial sessions or when the user pauses with work in flight.
+- `get_handoff` — load the most recent handoff at session start (or for a specific `session_id`). Use to resume cleanly without re-asking what was in progress.
+
+The `/handoff` slash command is a thin wrapper around `tag_handoff`. Prefer the direct MCP call when you have all fields ready in context; use `/handoff` when the user wants to type a quick pause-point.
+
+State that goes here, NOT in the ledger: "Working on auth refactor; paused at line 240 of users.rs", "Lean has 19 proven, 1 sorry", "training at step 25k". These rot quickly and should never be tagged as durable learnings.
 
 ## Producer/verifier in practice
 

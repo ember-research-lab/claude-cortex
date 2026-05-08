@@ -581,20 +581,69 @@ pub async fn get_session_summary(
     Ok(json!({"summaries": summaries, "total": summaries.len()}))
 }
 
+// ===== handoff tools (v0.4.0) =====
+
+/// Resolve the cortex-state directory for handoffs. Mirrors
+/// `load_active_memory`'s convention: `<ledger>/cortex-state/`.
+fn handoff_state_root(server: &CortexServer, project_dir: Option<&str>) -> anyhow::Result<PathBuf> {
+    let ledger = resolve_ledger(server, project_dir)?
+        .ok_or_else(|| anyhow!("no project ledger found and no global ledger available"))?;
+    Ok(ledger.join("cortex-state"))
+}
+
+fn handoff_to_json(h: &cortex_handoff::Handoff) -> Value {
+    json!({
+        "handoff_id": h.handoff_id,
+        "session_id": h.session_id,
+        "timestamp": h.timestamp.as_str(),
+        "completed_tasks": h.completed_tasks,
+        "pending_tasks": h.pending_tasks,
+        "blockers": h.blockers,
+        "modified_files": h.modified_files,
+        "context_notes": h.context_notes,
+    })
+}
+
+pub async fn get_handoff(server: &CortexServer, args: GetHandoffArgs) -> anyhow::Result<Value> {
+    let state_root = handoff_state_root(server, args.project_dir.as_deref())?;
+    let found = match args.session_id.as_deref() {
+        Some(sid) => cortex_handoff::latest_for_session(&state_root, sid)?,
+        None => cortex_handoff::read_current(&state_root)?,
+    };
+    match found {
+        Some(h) => Ok(json!({ "handoff": handoff_to_json(&h) })),
+        None => Ok(json!({
+            "handoff": null,
+            "note": "No handoff found. Use tag_handoff to record one at a pause-point.",
+        })),
+    }
+}
+
+pub async fn tag_handoff(server: &CortexServer, args: TagHandoffArgs) -> anyhow::Result<Value> {
+    if args.session_id.trim().is_empty() {
+        return Err(anyhow!("session_id is required and must not be empty"));
+    }
+    let state_root = handoff_state_root(server, args.project_dir.as_deref())?;
+    let handoff = cortex_handoff::Handoff::new(args.session_id)
+        .with_completed(args.completed_tasks)
+        .with_pending(args.pending_tasks)
+        .with_blockers(args.blockers)
+        .with_modified_files(args.modified_files)
+        .with_context(args.context_notes);
+    let path = cortex_handoff::record_handoff(&state_root, &handoff)?;
+    Ok(json!({
+        "handoff": handoff_to_json(&handoff),
+        "stored_at": path.display().to_string(),
+    }))
+}
+
 // ===== deferred tools (substrate not yet ported) =====
 
 const DEFERRED_NOTE: &str =
-    "Feature pending v3.x port. v3 ships with the ledger substrate; entity \
-     graph, handoff store, and cross-project recommender are scheduled for \
+    "Feature pending v3.x port. v3 ships with the ledger substrate; the \
+     entity graph and cross-project recommender are scheduled for \
      follow-on releases. v4's spectral retrieval (cortex-spectral crate) \
      subsumes much of this surface area.";
-
-pub async fn get_handoff(_server: &CortexServer, _args: GetHandoffArgs) -> anyhow::Result<Value> {
-    Ok(json!({
-        "handoff": null,
-        "error": DEFERRED_NOTE,
-    }))
-}
 
 pub async fn get_suggestions(
     _server: &CortexServer,

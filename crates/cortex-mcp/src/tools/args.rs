@@ -139,6 +139,35 @@ pub struct GetHandoffArgs {
     pub project_dir: Option<String>,
 }
 
+/// Record a fresh handoff capturing pause-point state.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct TagHandoffArgs {
+    /// Session identity. Use the Claude Code session id if available; any
+    /// stable string works for grouping multiple pauses from the same
+    /// session.
+    pub session_id: String,
+    /// Tasks completed during this session (or since last handoff).
+    #[serde(default)]
+    pub completed_tasks: Vec<String>,
+    /// Tasks still open at pause-point.
+    #[serde(default)]
+    pub pending_tasks: Vec<String>,
+    /// Anything blocking forward progress (waiting on credentials, design
+    /// decision, etc).
+    #[serde(default)]
+    pub blockers: Vec<String>,
+    /// Files modified during this session (reproduces what `git status`
+    /// would show; lets the next session orient quickly).
+    #[serde(default)]
+    pub modified_files: Vec<String>,
+    /// Free-form context. Where we paused, why, and any decision that
+    /// would otherwise be lost.
+    #[serde(default)]
+    pub context_notes: String,
+    #[serde(default)]
+    pub project_dir: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct GetSuggestionsArgs {
     #[serde(default = "default_suggestions_limit")]

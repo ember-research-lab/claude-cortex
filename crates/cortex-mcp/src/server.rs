@@ -12,7 +12,7 @@ use crate::tools::{
     args::{
         EntitySearchArgs, EntityShowArgs, EntityStatsArgs, GetHandoffArgs, GetLearningArgs,
         GetSessionSummaryArgs, GetSuggestionsArgs, LedgerStatsArgs, ListLearningsArgs,
-        RecordOutcomeArgs, SearchLearningsArgs, TagLearningArgs,
+        RecordOutcomeArgs, SearchLearningsArgs, TagHandoffArgs, TagLearningArgs,
     },
     impls,
 };
@@ -139,13 +139,30 @@ impl CortexServer {
     /// Get the latest work-in-progress handoff for session continuity.
     #[tool(
         name = "get_handoff",
-        description = "Get the latest work-in-progress handoff for session continuity."
+        description = "Get the latest work-in-progress handoff for session continuity. \
+                       With session_id, returns the latest handoff for that session; \
+                       without, returns the most recent handoff across all sessions."
     )]
     pub async fn get_handoff(
         &self,
         Parameters(args): Parameters<GetHandoffArgs>,
     ) -> Result<String, ErrorData> {
         impls::run(impls::get_handoff(self, args)).await
+    }
+
+    /// Record a handoff at a pause-point so the next session can resume.
+    #[tool(
+        name = "tag_handoff",
+        description = "Record a handoff at a pause-point capturing completed/pending tasks, \
+                       blockers, modified files, and free-form context notes. Use when the \
+                       user pauses work, switches focus, or ends a session — the next \
+                       session uses get_handoff to resume."
+    )]
+    pub async fn tag_handoff(
+        &self,
+        Parameters(args): Parameters<TagHandoffArgs>,
+    ) -> Result<String, ErrorData> {
+        impls::run(impls::tag_handoff(self, args)).await
     }
 
     /// Get cross-project learning suggestions from the global ledger.
