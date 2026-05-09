@@ -129,9 +129,37 @@ Existing v2 users:
 
 1. `/plugin uninstall claude-cortex@aaronb305` (Python v2)
 2. `/plugin install claude-cortex@ember-research-lab` (Rust v3)
-3. `cortex-migrate --check` once to validate the existing ledger against v3
+3. **Run `cortex-migrate` against your ledger** — see below. This is a real conversion, not a no-op.
+4. **Restart Claude Code** so the new MCP server reads the migrated ledger.
 
-The on-disk format is identical between v2 and v3, so step 3 is typically a no-op (validation only). Hash chain, signatures, and confidence values all carry over unchanged.
+The on-disk format is **not** identical between v2 and v3, despite carrying the same filenames:
+
+- `reinforcements.json` — v2 has a `privacy` field and naive timestamps (no `Z`); v3 requires `last_applied`, `block_id`, `content_hash`, `object_store_hash` and rejects naive timestamps via strict RFC3339 deserialize.
+- `index.json` / `blocks/*.json` — v2 timestamps are written by Pydantic with `Z` but hashed via Python `json.dumps(sort_keys=True)` against `+00:00` form; v3 hashes against `Z` form via serde-json. So v2 stored hashes don't match v3 recomputation; `cortex-migrate` re-hashes during transcription.
+
+**How to migrate (recommended flow):**
+
+```sh
+# 1. Sanity check — read-only validation against v2 hash form
+cortex-migrate --from ~/.claude/ledger --check
+
+# 2. Migrate to a scratch dir; --force tolerates the hash mismatches above
+cortex-migrate --from ~/.claude/ledger --to /tmp/ledger-v3 --force
+
+# 3. Preserve any non-ledger state the migrator doesn't touch
+cp -r ~/.claude/ledger/cortex-state /tmp/ledger-v3/
+cp ~/.claude/ledger/imports.json /tmp/ledger-v3/ 2>/dev/null || true
+
+# 4. Atomic swap (do this with no Claude Code session running)
+mv ~/.claude/ledger ~/.claude/ledger.preswap-$(date +%F)
+mv /tmp/ledger-v3 ~/.claude/ledger
+```
+
+Audit trail of re-hashed blocks lives in `~/.claude/ledger/MIGRATION.json` after step 4.
+
+**Symptom of skipping migration:** `tag_learning` returns `json decode at .../reinforcements.json: premature end of input` (or, on a partially-touched ledger, `missing field 'last_applied'`). The runtime does not auto-migrate — it expects v3-shape on disk.
+
+**Hybrid state warning:** if you ever ran a v3 binary against an un-migrated ledger, your `index.json` may already be v3-shape while `reinforcements.json` is still v2-shape. The `--force` flag handles this — the migrator re-hashes any v3-form blocks it finds and transcribes the v2 reinforcements.
 
 ## License
 
