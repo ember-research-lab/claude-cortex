@@ -11,3 +11,7 @@ Cargo.lock.bak
 **/.private_key
 **/.*.json.lock
 .claude/
+
+# Per-session mining drafts (content gets promoted to the ledger; the
+# files themselves are scratch and shouldn't track between machines).
+.cortex-candidates/
