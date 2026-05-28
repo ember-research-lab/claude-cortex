@@ -12,8 +12,25 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  version-guard:
+    name: version-guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert plugin.json version matches the tag
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pj="$(jq -r .version .claude-plugin/plugin.json)"
+          echo "tag=$tag  plugin.json=$pj"
+          if [ "$tag" != "$pj" ]; then
+            echo "::error::Tag v$tag does not match .claude-plugin/plugin.json version '$pj'. Bump plugin.json (and CHANGELOG) before tagging — Claude Code keys /plugin update on plugin.json version, so a stale value silently blocks the release from reaching users." >&2
+            exit 1
+          fi
+
   build:
     name: build (${{ matrix.target }})
+    needs: version-guard
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
