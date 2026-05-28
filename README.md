@@ -70,7 +70,7 @@ Hook subprocess cold-start budget is **under 100 ms**; MCP server response budge
 
 ## Install
 
-Once v0.3.0 ships on the Ember marketplace:
+Install from the Ember marketplace:
 
 ```sh
 /plugin marketplace add ember-research-lab/marketplace
@@ -115,6 +115,8 @@ Upgrading is two steps: refresh the plugin, then refresh the binaries.
 /plugin update claude-cortex@ember-research-lab
 ```
 The marketplace catalog and the installed plugin are separate caches — `marketplace update` refreshes the catalog, `plugin update` then pulls the new plugin version. Claude Code keys updates on the `version` field in `plugin.json`, so **every release must bump that field** (a `version-guard` CI job blocks any release tag whose `plugin.json` version doesn't match). Pushing commits without a version bump is a no-op for already-installed copies.
+
+To skip Step 1 on future releases, enable auto-update for the marketplace (`/plugin` → **Marketplaces** → `ember-research-lab` → **Enable auto-update**) — Claude Code then refreshes the catalog and updates the plugin at startup, prompting `/reload-plugins`. Third-party marketplaces have auto-update **off** by default. Step 2 (binaries) is never automatic.
 
 **Step 2 — refresh the binaries (NOT updated by step 1):**
 

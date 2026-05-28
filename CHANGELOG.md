@@ -8,7 +8,8 @@ All notable changes to claude-cortex are documented here. Format follows [Keep a
 - **`version-guard` CI job** (`release.yml`) — fails any `v*` release tag whose value doesn't match `.claude-plugin/plugin.json` `version`. Prevents the silent-stale-update footgun: Claude Code keys `/plugin update` on `plugin.json` version, so a tag/manifest mismatch (e.g. tagging `v0.4.0` while the manifest still says `0.4.0-rc1`) leaves every installed copy stuck. The guard runs before `build`, so a mismatched release never publishes artifacts.
 
 ### Changed
-- **README Upgrading** is now an explicit two-step flow: `/plugin marketplace update` + `/plugin update` (plugin/markdown), then re-run `install.sh` (binaries), documenting that the catalog cache and plugin cache are separate and that updates are version-keyed.
+- **README Upgrading** is now an explicit two-step flow: `/plugin marketplace update` + `/plugin update` (plugin/markdown), then re-run `install.sh` (binaries), documenting that the catalog cache and plugin cache are separate and that updates are version-keyed. Adds an optional auto-update note (marketplace toggle; off by default for third-party marketplaces).
+- **README Install** drops the stale "Once v0.3.0 ships" preamble (the plugin is shipped and at 0.4.x).
 
 ## [0.4.1] — 2026-05-28
 
