@@ -107,9 +107,18 @@ which cortex-session-start cortex-post-tool-use cortex-session-end cortex-migrat
 
 ## Upgrading
 
-> **Important:** plugin updates do NOT update the binaries.
+Upgrading is two steps: refresh the plugin, then refresh the binaries.
 
-Claude Code's plugin loader refreshes the markdown / hooks.json / plugin.json / `bin/` shims via `git pull` on plugin reload, but it does not rebuild the Rust binaries on PATH. After every cortex release, refresh the binaries explicitly — just re-run the installer:
+**Step 1 — refresh the plugin (markdown / hooks.json / plugin.json / `bin/` shims):**
+```
+/plugin marketplace update ember-research-lab
+/plugin update claude-cortex@ember-research-lab
+```
+The marketplace catalog and the installed plugin are separate caches — `marketplace update` refreshes the catalog, `plugin update` then pulls the new plugin version. Claude Code keys updates on the `version` field in `plugin.json`, so **every release must bump that field** (a `version-guard` CI job blocks any release tag whose `plugin.json` version doesn't match). Pushing commits without a version bump is a no-op for already-installed copies.
+
+**Step 2 — refresh the binaries (NOT updated by step 1):**
+
+The plugin loader pulls source but does not rebuild the Rust binaries on PATH. After every release, re-run the installer:
 
 ```sh
 bash "$CLAUDE_PLUGIN_ROOT/install.sh"

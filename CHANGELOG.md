@@ -4,6 +4,12 @@ All notable changes to claude-cortex are documented here. Format follows [Keep a
 
 ## [Unreleased]
 
+### Added
+- **`version-guard` CI job** (`release.yml`) — fails any `v*` release tag whose value doesn't match `.claude-plugin/plugin.json` `version`. Prevents the silent-stale-update footgun: Claude Code keys `/plugin update` on `plugin.json` version, so a tag/manifest mismatch (e.g. tagging `v0.4.0` while the manifest still says `0.4.0-rc1`) leaves every installed copy stuck. The guard runs before `build`, so a mismatched release never publishes artifacts.
+
+### Changed
+- **README Upgrading** is now an explicit two-step flow: `/plugin marketplace update` + `/plugin update` (plugin/markdown), then re-run `install.sh` (binaries), documenting that the catalog cache and plugin cache are separate and that updates are version-keyed.
+
 ## [0.4.1] — 2026-05-28
 
 Fixes the `/bin/sh: cortex-session-start: not found` hook failures: the plugin install never built the Rust binaries the hooks/MCP invoke, and there was no automated way to do so. Adds a one-shot installer and self-healing PATH shims. Also corrects the `plugin.json` version, which the `v0.4.0` release left at `0.4.0-rc1`.
