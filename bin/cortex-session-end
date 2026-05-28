@@ -1,0 +1,14 @@
+#!/bin/sh
+# Fallback shim for cortex-session-end.
+#
+# Exec's the real binary if installed; otherwise exits cleanly (silent no-op,
+# matching the post-tool-use shim).
+
+NAME=cortex-session-end
+for dir in "${CORTEX_BIN_DIR:-$HOME/.local/bin}" "$HOME/.cargo/bin" "${CLAUDE_PLUGIN_ROOT:-}/target/release"; do
+  [ -n "$dir" ] || continue
+  if [ -x "$dir/$NAME" ]; then
+    exec "$dir/$NAME" "$@"
+  fi
+done
+exit 0

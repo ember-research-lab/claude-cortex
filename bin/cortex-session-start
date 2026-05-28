@@ -1,0 +1,20 @@
+#!/bin/sh
+# Fallback shim for cortex-session-start.
+#
+# Claude Code adds this plugin's bin/ dir to PATH automatically. If the real
+# Rust binary has been installed (via install.sh, to a dir earlier in PATH),
+# this shim is never reached. It only runs when the binaries are NOT yet
+# installed -- in which case it exec's a built binary if one exists, otherwise
+# emits a non-fatal SessionStart payload telling the user how to install.
+
+NAME=cortex-session-start
+for dir in "${CORTEX_BIN_DIR:-$HOME/.local/bin}" "$HOME/.cargo/bin" "${CLAUDE_PLUGIN_ROOT:-}/target/release"; do
+  [ -n "$dir" ] || continue
+  if [ -x "$dir/$NAME" ]; then
+    exec "$dir/$NAME" "$@"
+  fi
+done
+
+installer="${CLAUDE_PLUGIN_ROOT:-the plugin directory}/install.sh"
+echo "cortex: Rust binaries not installed; run \`bash \"$installer\"\` then restart Claude Code." >&2
+printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"⚠️ Cortex binaries are not installed, so memory orientation and ledger tools are inactive this session. Run `bash \"$CLAUDE_PLUGIN_ROOT/install.sh\"` (see the plugin README Install section), then restart Claude Code."}}'

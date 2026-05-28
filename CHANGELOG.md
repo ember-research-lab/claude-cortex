@@ -4,6 +4,18 @@ All notable changes to claude-cortex are documented here. Format follows [Keep a
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-05-28
+
+Fixes the `/bin/sh: cortex-session-start: not found` hook failures: the plugin install never built the Rust binaries the hooks/MCP invoke, and there was no automated way to do so. Adds a one-shot installer and self-healing PATH shims. Also corrects the `plugin.json` version, which the `v0.4.0` release left at `0.4.0-rc1`.
+
+### Added
+- **`install.sh` one-shot binary installer.** Builds the release binaries (`cortex-hooks`, `cortex-mcp`, `cortex-migrate`, `cortex-dream`) and installs all six onto PATH (`~/.local/bin` by default, override with `CORTEX_BIN_DIR`). Run once after `/plugin install` and after each upgrade: `bash "$CLAUDE_PLUGIN_ROOT/install.sh"`. Idempotent.
+- **`bin/` fallback shims** for the three hook binaries (`cortex-session-start`, `cortex-post-tool-use`, `cortex-session-end`). Claude Code auto-adds a plugin's `bin/` to PATH, so these resolve even before `install.sh` runs — exec'ing the real binary if installed (in a PATH dir earlier than the plugin cache), otherwise degrading gracefully. Fixes the `/bin/sh: cortex-session-start: not found` hook failures seen when the binaries were never installed: SessionStart now emits a non-fatal payload telling the user to run `install.sh`, and the high-frequency PostToolUse / SessionEnd hooks no-op silently instead of erroring on every call.
+
+### Changed
+- **README Install / Upgrading** lead with `install.sh`; manual release-artifact / `cargo install` paths remain as alternatives.
+- **`hooks.json` description** documents the shim-then-install model.
+
 ## [0.4.0-rc1] — 2026-05-08
 
 First release candidate of the v4 line. Spectral retrieval (cortex-similarity / cortex-spectral / cortex-active-memory / cortex-monitor / cortex-dream) lands as the new substrate-respecting layer on top of the v3 ledger; alongside it, the handoff substrate fills the "ephemeral state" gap surfaced during the v0.3.6 pattern-vs-state work. Orientation is now auto-injected at SessionStart so it doesn't depend on Skill-tool surfacing quirks.
