@@ -1,0 +1,15 @@
+#!/bin/sh
+# Fallback shim for cortex-post-tool-use.
+#
+# Exec's the real binary if installed; otherwise exits cleanly. PostToolUse
+# fires on every tool call, so the uninstalled path is a SILENT no-op (the
+# SessionStart shim already surfaces the install instruction once per session).
+
+NAME=cortex-post-tool-use
+for dir in "${CORTEX_BIN_DIR:-$HOME/.local/bin}" "$HOME/.cargo/bin" "${CLAUDE_PLUGIN_ROOT:-}/target/release"; do
+  [ -n "$dir" ] || continue
+  if [ -x "$dir/$NAME" ]; then
+    exec "$dir/$NAME" "$@"
+  fi
+done
+exit 0

@@ -77,20 +77,23 @@ Once v0.3.0 ships on the Ember marketplace:
 /plugin install claude-cortex@ember-research-lab
 ```
 
-The plugin install fetches the markdown (agents, skills, hooks/hooks.json) and `plugin.json`. It does **not** install the Rust binaries — those need to be on PATH. Two ways:
+The plugin install fetches the markdown (agents, skills, hooks/hooks.json) and `plugin.json`, plus the `bin/` shims that keep the hooks from hard-failing. It does **not** build the Rust binaries the hooks and MCP server actually run — those need to be on PATH. Until you build them, `cortex-session-start` prints an install reminder and the other hooks no-op; nothing crashes.
 
-**A. From a release artifact (recommended):**
+**Run the installer once (Rust ≥ 1.85):**
 ```sh
-# Download the platform-matching tarball from
-# https://github.com/ember-research-lab/claude-cortex/releases
-tar -xzf claude-cortex-x86_64-unknown-linux-gnu.tar.gz
-cp claude-cortex-*/cortex-* ~/.local/bin/   # or anywhere on PATH
+bash "$CLAUDE_PLUGIN_ROOT/install.sh"   # builds release binaries -> ~/.local/bin
 ```
 
-**B. From source (Rust ≥ 1.85):**
+`$CLAUDE_PLUGIN_ROOT` points at the installed plugin (under `~/.claude/plugins/cache/...`); from a source checkout just run `bash install.sh` in the repo root. Override the destination with `CORTEX_BIN_DIR=~/bin bash install.sh`. Then **restart Claude Code**.
+
+Alternatives if you prefer to manage binaries yourself:
+
 ```sh
-git clone https://github.com/ember-research-lab/claude-cortex
-cd claude-cortex
+# From a release artifact:
+tar -xzf claude-cortex-x86_64-unknown-linux-gnu.tar.gz
+cp claude-cortex-*/cortex-* ~/.local/bin/   # or anywhere on PATH
+
+# Or per-crate from source:
 cargo install --path crates/cortex-mcp --bins
 cargo install --path crates/cortex-hooks --bins
 cargo install --path crates/cortex-migrate --bins
@@ -106,15 +109,20 @@ which cortex-session-start cortex-post-tool-use cortex-session-end cortex-migrat
 
 > **Important:** plugin updates do NOT update the binaries.
 
-Claude Code's plugin loader refreshes the markdown / hooks.json / plugin.json via `git pull` on plugin reload, but it does not rebuild or re-fetch the Rust binaries on PATH. After every cortex release, refresh the binaries explicitly:
+Claude Code's plugin loader refreshes the markdown / hooks.json / plugin.json / `bin/` shims via `git pull` on plugin reload, but it does not rebuild the Rust binaries on PATH. After every cortex release, refresh the binaries explicitly — just re-run the installer:
 
 ```sh
-# Option A — from the release artifact
+bash "$CLAUDE_PLUGIN_ROOT/install.sh"
+```
+
+Or manage them yourself:
+```sh
+# From the release artifact
 curl -L https://github.com/ember-research-lab/claude-cortex/releases/latest/download/claude-cortex-x86_64-unknown-linux-gnu.tar.gz \
   | tar -xz
 cp claude-cortex-*/cortex-* ~/.local/bin/
 
-# Option B — from a fresh source tree
+# Or per-crate from a fresh source tree
 cd /path/to/claude-cortex && git pull
 cargo install --path crates/cortex-mcp --bins
 cargo install --path crates/cortex-hooks --bins
