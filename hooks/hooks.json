@@ -1,5 +1,5 @@
 {
-  "description": "claude-cortex Rust hooks: orient on session start, discovery-tag after substantive tool calls, extract outcomes on session end. Binaries (cortex-session-start, cortex-post-tool-use, cortex-session-end) must be on PATH — install via the release artifact or `cargo install --path crates/cortex-hooks --bins`.",
+  "description": "claude-cortex Rust hooks: orient on session start, discovery-tag after substantive tool calls, extract outcomes on session end. The hook commands resolve to bin/ shims (auto-added to PATH by Claude Code) until you build the real binaries with `bash \"$CLAUDE_PLUGIN_ROOT/install.sh\"`; until then the shims degrade gracefully (SessionStart prints install instructions, the rest no-op).",
   "hooks": {
     "SessionStart": [
       {
