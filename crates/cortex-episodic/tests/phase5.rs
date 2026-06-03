@@ -217,6 +217,49 @@ fn episode_pruned_after_ttl_regardless_of_outcomes() {
 }
 
 // ---------------------------------------------------------------------------
+// Test (I2): empty_promotion_is_evictable
+// ---------------------------------------------------------------------------
+
+#[test]
+fn empty_promotion_is_evictable() {
+    let tmp = TempDir::new().unwrap();
+    let state_root = tmp.path();
+
+    let mut manifest = EpisodeManifest::default();
+    // Episode with NO promoted_block_ids — nothing to confirm.
+    let ep = seed_consolidated_episode(
+        state_root,
+        &mut manifest,
+        "session-empty-promo",
+        vec![], // empty
+        5,      // within TTL=30
+    );
+    save_manifest(state_root, &manifest).unwrap();
+
+    let reinforcements = Reinforcements::default();
+    let manifest = reconcile_eviction(manifest, &reinforcements, 30);
+
+    assert_eq!(
+        manifest.episodes[&ep.episode_id].status,
+        EpisodeStatus::Evictable,
+        "episode with empty promoted_block_ids must be immediately Evictable"
+    );
+
+    let episode_file = episodic_dir(state_root).join(ep.filename());
+    let mut manifest_mut = manifest;
+    let pruned = prune_evictable(state_root, &mut manifest_mut).unwrap();
+    assert_eq!(pruned, 1, "prune_evictable should remove 1 episode");
+    assert!(
+        !manifest_mut.episodes.contains_key(&ep.episode_id),
+        "episode should be removed from manifest after prune"
+    );
+    assert!(
+        !episode_file.is_file(),
+        "episode file should be deleted from disk after prune"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Test 4: episode_retrievable_before_eviction
 // ---------------------------------------------------------------------------
 

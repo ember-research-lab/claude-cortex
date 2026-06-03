@@ -11,7 +11,8 @@ use uuid::Uuid;
 pub enum EpisodeStatus {
     /// Captured but not yet processed by the consolidator.
     Unconsolidated,
-    /// The consolidator is actively processing this episode (guard state).
+    /// Reserved for a future in-progress concurrency guard. Not currently
+    /// written by any code; if present it is treated as pending.
     Consolidating,
     /// Consolidator has promoted learnings; awaiting outcome confirmation.
     ConsolidatedPendingConfirmation,
@@ -45,6 +46,16 @@ pub struct EpisodeRecord {
     /// Custom instructions active at capture time, if captured.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_instructions: Option<String>,
+}
+
+impl EpisodeStatus {
+    /// Returns `true` if this episode has not yet been consolidated.
+    ///
+    /// Covers both `Unconsolidated` and `Consolidating` so that a future
+    /// status variant cannot be silently missed by callers.
+    pub fn is_pending(&self) -> bool {
+        matches!(self, Self::Unconsolidated | Self::Consolidating)
+    }
 }
 
 impl EpisodeRecord {

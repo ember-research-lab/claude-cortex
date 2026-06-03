@@ -1,20 +1,25 @@
-//! `capture_tail` — read a transcript tail from the current watermark and
-//! write a new `EpisodeRecord` to disk.
+//! `capture_tail` — record the byte RANGE of the new transcript tail
+//! (watermark→EOF) WITHOUT reading the contents, and write a new
+//! `EpisodeRecord` to disk. The consolidator reads the actual bytes later
+//! using the stored `byte_range`.
 
 use std::path::Path;
 
 use crate::episode::EpisodeRecord;
 use crate::manifest::{episodic_dir, load_manifest, save_manifest};
 
-/// Capture the transcript tail starting at the current watermark for
+/// Record the byte range of the new transcript tail (watermark→EOF) for
 /// `session_id`, write the episode JSON, and advance the watermark in
-/// the manifest.
+/// the manifest. Does NOT read the transcript contents — the byte range
+/// is stored so the consolidator can read the bytes later.
 ///
-/// Returns `None` when the transcript has not grown past the watermark
+/// Returns `None` when there are no new bytes past the watermark
 /// (idempotent no-op). Returns `Some(episode)` on a successful capture.
 ///
-/// When `transcript_path` is `None` or the file is absent, the episode
-/// is written with `byte_range: [0, 0]` rather than returning an error.
+/// When `transcript_path` is `None`, the episode is written with
+/// `byte_range: [0, 0]` (once per session, idempotent on repeat calls).
+/// When `transcript_path` is `Some` but the file is absent, returns `None`
+/// (no-op: nothing to record).
 pub fn capture_tail(
     state_root: &Path,
     session_id: &str,
@@ -35,13 +40,19 @@ pub fn capture_tail(
         Some(path) => {
             let file_len = match std::fs::metadata(path) {
                 Ok(meta) => meta.len(),
-                Err(_) => 0,
+                Err(_) => {
+                    // File absent: no new bytes — no-op.
+                    return Ok(None);
+                }
             };
-            if file_len <= watermark {
+            // If the file was truncated/rotated below the prior watermark,
+            // reset to capture from the beginning of the new file.
+            let start = if file_len < watermark { 0 } else { watermark };
+            if file_len <= start {
                 // No new bytes — no-op.
                 return Ok(None);
             }
-            (watermark, file_len)
+            (start, file_len)
         }
         None => {
             // No transcript path; write a zero-range episode once (only if
