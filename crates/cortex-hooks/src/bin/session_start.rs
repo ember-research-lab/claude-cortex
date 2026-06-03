@@ -105,7 +105,10 @@ fn consolidation_directive(state_root: &Path, source: &str) -> Option<String> {
         "{header}\n\n\
          {ids_list}\n\n\
          Dispatch the `consolidator` agent over these episode IDs to promote \
-         surviving learnings into the long-term ledger."
+         surviving learnings into the long-term ledger.\n\n\
+         After the consolidator has finished promoting learnings via tag_learning, \
+         run `/cortex-dream` to regenerate active memory so the new learnings are \
+         reflected immediately."
     ))
 }
 
@@ -268,6 +271,47 @@ mod tests {
         assert!(
             !context.contains("Consolidation"),
             "no consolidation section when no manifest; got:\n{context}"
+        );
+    }
+
+    #[test]
+    fn session_start_includes_dream_directive_after_consolidation() {
+        let (tmp, episode_id) = seed_manifest_with_episode(EpisodeStatus::Unconsolidated);
+        let context = build_context(&[], Some(tmp.path()), "compact");
+
+        // Must contain the consolidation directive.
+        assert!(
+            context.contains("consolidator"),
+            "should mention the consolidator agent; got:\n{context}"
+        );
+        assert!(
+            context.contains(&episode_id),
+            "should include the pending episode id; got:\n{context}"
+        );
+
+        // Must also contain the dream re-index directive.
+        assert!(
+            context.contains("cortex-dream"),
+            "should contain cortex-dream re-index directive; got:\n{context}"
+        );
+        assert!(
+            context.contains("regenerate active memory"),
+            "should explain why cortex-dream is invoked; got:\n{context}"
+        );
+    }
+
+    #[test]
+    fn no_dream_directive_on_zero_pending_episodes() {
+        let (tmp, _episode_id) = seed_manifest_with_episode(EpisodeStatus::Evictable);
+        let context = build_context(&[], Some(tmp.path()), "compact");
+
+        assert!(
+            !context.contains("cortex-dream"),
+            "no cortex-dream directive when all episodes are non-pending; got:\n{context}"
+        );
+        assert!(
+            !context.contains("consolidator"),
+            "no consolidation directive when zero pending; got:\n{context}"
         );
     }
 }
