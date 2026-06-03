@@ -6,8 +6,6 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use cortex_episodic::episode::EpisodeStatus;
-
 use chrono::Utc;
 use cortex_core::confidence::decay_confidence;
 use cortex_core::models::Reinforcement;
@@ -143,10 +141,14 @@ fn category_str(c: cortex_core::models::LearningCategory) -> &'static str {
 /// Returns `false` on any I/O error (fail-safe: must never crash SessionStart).
 pub fn has_pending_episodes(state_root: &Path) -> bool {
     match cortex_episodic::load_manifest(state_root) {
-        Ok(manifest) => manifest.episodes.values().any(|e| {
-            e.status == EpisodeStatus::Unconsolidated || e.status == EpisodeStatus::Consolidating
-        }),
-        Err(_) => false,
+        Ok(manifest) => manifest.episodes.values().any(|e| e.status.is_pending()),
+        Err(e) => {
+            eprintln!(
+                "cortex-session-start: failed to read episodic manifest \
+                 (treating as no pending episodes): {e}"
+            );
+            false
+        }
     }
 }
 
@@ -160,16 +162,19 @@ pub fn pending_episode_ids(state_root: &Path) -> Vec<String> {
             let mut ids: Vec<String> = manifest
                 .episodes
                 .values()
-                .filter(|e| {
-                    e.status == EpisodeStatus::Unconsolidated
-                        || e.status == EpisodeStatus::Consolidating
-                })
+                .filter(|e| e.status.is_pending())
                 .map(|e| e.episode_id.clone())
                 .collect();
             ids.sort();
             ids
         }
-        Err(_) => Vec::new(),
+        Err(e) => {
+            eprintln!(
+                "cortex-session-start: failed to read episodic manifest \
+                 (treating as no pending episodes): {e}"
+            );
+            Vec::new()
+        }
     }
 }
 

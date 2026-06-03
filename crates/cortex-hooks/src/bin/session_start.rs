@@ -67,12 +67,18 @@ fn main() {
     }
 }
 
-/// Best-effort reconcile-and-prune. Silently returns on any error.
+/// Best-effort reconcile-and-prune. Logs non-fatal errors; never panics.
 fn run_eviction(state_root: &Path, project_dir: Option<&Path>) {
     // Load the episodic manifest (missing manifest → nothing to evict).
     let mut manifest = match cortex_episodic::load_manifest(state_root) {
         Ok(m) => m,
-        Err(_) => return,
+        Err(e) => {
+            eprintln!(
+                "cortex-session-start: failed to load episodic manifest for eviction \
+                 (non-fatal): {e}"
+            );
+            return;
+        }
     };
 
     // Load reinforcements from the project ledger.
@@ -81,6 +87,12 @@ fn run_eviction(state_root: &Path, project_dir: Option<&Path>) {
             let ledger_path = project_ledger_path(pd);
             cortex_core::Ledger::open(&ledger_path)
                 .and_then(|l| l.read_reinforcements())
+                .inspect_err(|e| {
+                    eprintln!(
+                        "cortex-session-start: failed to read reinforcements for eviction \
+                         (non-fatal, using empty): {e}"
+                    );
+                })
                 .ok()
         })
         .unwrap_or_default();
@@ -89,7 +101,9 @@ fn run_eviction(state_root: &Path, project_dir: Option<&Path>) {
     manifest = cortex_episodic::reconcile_eviction(manifest, &reinforcements, TTL_DAYS);
 
     // Prune evictable episodes from disk and persist the updated manifest.
-    let _ = cortex_episodic::prune_evictable(state_root, &mut manifest);
+    if let Err(e) = cortex_episodic::prune_evictable(state_root, &mut manifest) {
+        eprintln!("cortex-session-start: episode eviction failed (non-fatal): {e}");
+    }
 }
 
 fn build_context(

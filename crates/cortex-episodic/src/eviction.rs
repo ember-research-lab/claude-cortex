@@ -14,6 +14,7 @@ use crate::episode::{EpisodeRecord, EpisodeStatus};
 use crate::manifest::{episodic_dir, save_manifest, EpisodeManifest};
 
 /// Pure: mark episodes as `Evictable` when:
+/// - `promoted_block_ids` is empty (nothing to confirm), OR
 /// - All `promoted_block_ids` have at least one `Success` outcome in the
 ///   reinforcements ledger, OR
 /// - The episode is older than `ttl_days` (TTL backstop).
@@ -43,8 +44,9 @@ pub fn reconcile_eviction(
             continue;
         }
 
-        // Outcome confirmation: all promoted blocks must have a Success outcome.
-        if !episode.promoted_block_ids.is_empty() && all_blocks_confirmed(episode, reinforcements) {
+        // Outcome confirmation: empty promoted_block_ids means nothing to confirm
+        // (mark evictable immediately); otherwise all blocks must have a Success outcome.
+        if episode.promoted_block_ids.is_empty() || all_blocks_confirmed(episode, reinforcements) {
             episode.status = EpisodeStatus::Evictable;
         }
     }
