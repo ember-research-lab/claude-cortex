@@ -343,6 +343,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "cortex-core",
+ "cortex-episodic",
  "serde",
  "serde_json",
  "tempfile",
