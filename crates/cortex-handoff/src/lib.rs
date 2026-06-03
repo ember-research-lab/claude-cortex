@@ -29,6 +29,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use cortex_core::persist::{read_pointer, write_atomic_json, write_pointer};
 use cortex_core::time::UtcTime;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -108,25 +109,10 @@ fn handoff_filename(h: &Handoff) -> String {
 /// slot, updated via temp+rename.
 pub fn record_handoff(state_root: &Path, h: &Handoff) -> anyhow::Result<PathBuf> {
     let dir = handoffs_dir(state_root);
-    fs::create_dir_all(&dir)?;
     let filename = handoff_filename(h);
     let target = dir.join(&filename);
-    let tmp_target = dir.join(format!("{filename}.{}.tmp", Uuid::new_v4().simple()));
-    let bytes = serde_json::to_vec_pretty(h)?;
-    fs::write(&tmp_target, &bytes)?;
-    if let Err(e) = fs::rename(&tmp_target, &target) {
-        let _ = fs::remove_file(&tmp_target);
-        return Err(e.into());
-    }
-
-    let current = current_pointer_path(state_root);
-    let tmp_pointer = dir.join(format!("current.{}.tmp", Uuid::new_v4().simple()));
-    fs::write(&tmp_pointer, filename.as_bytes())?;
-    if let Err(e) = fs::rename(&tmp_pointer, &current) {
-        let _ = fs::remove_file(&tmp_pointer);
-        return Err(e.into());
-    }
-
+    write_atomic_json(&target, h).map_err(|e| anyhow::anyhow!("{e}"))?;
+    write_pointer(&dir, "current", &filename).map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(target)
 }
 
@@ -134,15 +120,11 @@ pub fn record_handoff(state_root: &Path, h: &Handoff) -> anyhow::Result<PathBuf>
 /// `None` if no current pointer exists. Errors only on I/O / parse
 /// failure of an existing pointer or handoff.
 pub fn read_current(state_root: &Path) -> anyhow::Result<Option<Handoff>> {
-    let pointer = current_pointer_path(state_root);
-    if !pointer.is_file() {
+    let dir = handoffs_dir(state_root);
+    let Some(filename) = read_pointer(&dir, "current").map_err(|e| anyhow::anyhow!("{e}"))? else {
         return Ok(None);
-    }
-    let filename = fs::read_to_string(&pointer)?.trim().to_string();
-    if filename.is_empty() {
-        return Ok(None);
-    }
-    let path = handoffs_dir(state_root).join(&filename);
+    };
+    let path = dir.join(&filename);
     if !path.is_file() {
         return Ok(None);
     }
