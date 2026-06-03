@@ -6,6 +6,8 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use cortex_episodic::episode::EpisodeStatus;
+
 use chrono::Utc;
 use cortex_core::confidence::decay_confidence;
 use cortex_core::models::Reinforcement;
@@ -132,6 +134,42 @@ fn category_str(c: cortex_core::models::LearningCategory) -> &'static str {
         Decision => "decision",
         Error => "error",
         Pattern => "pattern",
+    }
+}
+
+/// Returns `true` if the episodic manifest in `state_root` contains any episode
+/// with status `Unconsolidated` or `Consolidating`.
+///
+/// Returns `false` on any I/O error (fail-safe: must never crash SessionStart).
+pub fn has_pending_episodes(state_root: &Path) -> bool {
+    match cortex_episodic::load_manifest(state_root) {
+        Ok(manifest) => manifest.episodes.values().any(|e| {
+            e.status == EpisodeStatus::Unconsolidated || e.status == EpisodeStatus::Consolidating
+        }),
+        Err(_) => false,
+    }
+}
+
+/// Returns the episode IDs of all pending (Unconsolidated or Consolidating)
+/// episodes in `state_root`, sorted for deterministic output.
+///
+/// Returns an empty vec on any I/O error (fail-safe).
+pub fn pending_episode_ids(state_root: &Path) -> Vec<String> {
+    match cortex_episodic::load_manifest(state_root) {
+        Ok(manifest) => {
+            let mut ids: Vec<String> = manifest
+                .episodes
+                .values()
+                .filter(|e| {
+                    e.status == EpisodeStatus::Unconsolidated
+                        || e.status == EpisodeStatus::Consolidating
+                })
+                .map(|e| e.episode_id.clone())
+                .collect();
+            ids.sort();
+            ids
+        }
+        Err(_) => Vec::new(),
     }
 }
 
