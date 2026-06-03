@@ -28,6 +28,9 @@ use cortex_hooks::{
 const PROJECT_MIN_CONF: f64 = 0.7;
 const GLOBAL_MIN_CONF: f64 = 0.8;
 const TOP_K: usize = 8;
+/// Episodes older than this many days are evicted regardless of outcome
+/// confirmation (TTL backstop).
+const TTL_DAYS: u32 = 30;
 
 /// Full cortex-orientation skill body, embedded at compile time. Single
 /// source of truth: edit `skills/cortex-orientation/SKILL.md` and the
@@ -53,6 +56,40 @@ fn main() {
 
     let context = build_context(&learnings, state_root.as_deref(), source);
     cortex_hooks::write_output("SessionStart", context);
+
+    // Phase 5: lazy outcome-gated eviction.
+    //
+    // After the JSON output is flushed, run a best-effort reconcile-and-prune
+    // step. Any I/O failure is silently ignored so SessionStart never crashes.
+    // This step is idempotent: already-pruned episodes are a no-op.
+    if let Some(ref sr) = state_root {
+        run_eviction(sr, project.as_deref());
+    }
+}
+
+/// Best-effort reconcile-and-prune. Silently returns on any error.
+fn run_eviction(state_root: &Path, project_dir: Option<&Path>) {
+    // Load the episodic manifest (missing manifest → nothing to evict).
+    let mut manifest = match cortex_episodic::load_manifest(state_root) {
+        Ok(m) => m,
+        Err(_) => return,
+    };
+
+    // Load reinforcements from the project ledger.
+    let reinforcements = project_dir
+        .and_then(|pd| {
+            let ledger_path = project_ledger_path(pd);
+            cortex_core::Ledger::open(&ledger_path)
+                .and_then(|l| l.read_reinforcements())
+                .ok()
+        })
+        .unwrap_or_default();
+
+    // Pure reconciliation: update episode statuses in-memory.
+    manifest = cortex_episodic::reconcile_eviction(manifest, &reinforcements, TTL_DAYS);
+
+    // Prune evictable episodes from disk and persist the updated manifest.
+    let _ = cortex_episodic::prune_evictable(state_root, &mut manifest);
 }
 
 fn build_context(
