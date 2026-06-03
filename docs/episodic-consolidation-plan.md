@@ -284,14 +284,14 @@ The `trigger` field from `extra` maps to `capture_source`:
       {
         "type": "command",
         "command": "cortex-pre-compact",
-        "background": true
+        "async": true
       }
     ]
   }
 ]
 ```
 
-`"background": true` is the async/non-blocking declaration per Claude Code hook
+`"async": true` is the async/non-blocking declaration per Claude Code hook
 docs (spec requirement: "async, non-blocking"). Verify against Claude Code hook
 docs at implementation time — the exact field name may differ.
 
