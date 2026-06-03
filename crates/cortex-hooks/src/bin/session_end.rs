@@ -11,7 +11,7 @@
 //! stderr instead of stdout. Stderr is shown to the user as a session-end
 //! notice and bypasses JSON validation entirely. Stdout is left empty.
 
-use cortex_hooks::read_input;
+use cortex_hooks::{project_dir, project_ledger_path, read_input};
 
 fn main() {
     let input = read_input();
@@ -19,6 +19,39 @@ fn main() {
     if !directive.is_empty() {
         eprintln!("{directive}");
     }
+    // Best-effort episodic capture: snapshot the tail so nothing is lost.
+    if let Err(e) = capture_episode(&input) {
+        eprintln!("cortex-session-end: capture failed (non-fatal): {e}");
+    }
+}
+
+fn capture_episode(input: &cortex_hooks::HookInput) -> anyhow::Result<()> {
+    let session_id = input
+        .session_id
+        .as_deref()
+        .unwrap_or("unknown-session")
+        .to_string();
+    let transcript_path = input.transcript_path.as_deref();
+    let reason = input
+        .extra
+        .get("reason")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let capture_source = format!("sessionend:{reason}");
+
+    let pd = project_dir(input).ok_or_else(|| anyhow::anyhow!("no cwd available"))?;
+    let ledger_path = project_ledger_path(&pd);
+    let state_root = ledger_path.join("cortex-state");
+
+    cortex_episodic::capture_tail(
+        &state_root,
+        &session_id,
+        transcript_path,
+        &capture_source,
+        None,
+    )?;
+
+    Ok(())
 }
 
 fn build_directive(input: &cortex_hooks::HookInput) -> String {

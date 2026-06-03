@@ -11,6 +11,7 @@ members = [
     "crates/cortex-monitor",
     "crates/cortex-dream",
     "crates/cortex-handoff",
+    "crates/cortex-episodic",
 ]
 
 [workspace.package]
@@ -79,6 +80,7 @@ fs2 = "0.4"
 
 # Internal
 cortex-core = { path = "crates/cortex-core" }
+cortex-episodic = { path = "crates/cortex-episodic" }
 
 [profile.release]
 opt-level = 3

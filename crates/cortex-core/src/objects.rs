@@ -9,7 +9,6 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::error::{Error, Result};
 use crate::hashing::compute_content_hash;
@@ -168,28 +167,7 @@ impl ObjectStore {
     }
 }
 
-pub(crate) fn write_atomic_json<T: Serialize>(target: &Path, value: &T) -> Result<()> {
-    let parent = target
-        .parent()
-        .ok_or_else(|| Error::Malformed(format!("no parent dir for {}", target.display())))?;
-    std::fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
-    let tmp_name = format!(
-        "{}.{}.tmp",
-        target
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("object"),
-        Uuid::new_v4().simple()
-    );
-    let tmp_path = parent.join(tmp_name);
-    let bytes = serde_json::to_vec_pretty(value).map_err(|e| Error::json(target, e))?;
-    std::fs::write(&tmp_path, &bytes).map_err(|e| Error::io(&tmp_path, e))?;
-    if let Err(e) = std::fs::rename(&tmp_path, target) {
-        let _ = std::fs::remove_file(&tmp_path);
-        return Err(Error::io(target, e));
-    }
-    Ok(())
-}
+pub(crate) use crate::persist::write_atomic_json;
 
 #[cfg(test)]
 mod tests {

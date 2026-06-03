@@ -19,7 +19,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST="${CORTEX_BIN_DIR:-$HOME/.local/bin}"
 
-BINS="cortex-session-start cortex-post-tool-use cortex-session-end cortex-mcp cortex-migrate cortex-dream"
+BINS="cortex-session-start cortex-post-tool-use cortex-session-end cortex-pre-compact cortex-mcp cortex-migrate cortex-dream"
 
 if ! command -v cargo >/dev/null 2>&1; then
   echo "error: cargo not found. Install Rust (>= 1.85) from https://rustup.rs and retry." >&2
