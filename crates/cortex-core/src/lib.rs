@@ -13,6 +13,7 @@ pub mod hashing;
 pub mod merkle;
 pub mod models;
 pub mod objects;
+pub mod persist;
 pub mod signing;
 pub mod store;
 pub mod time;
@@ -28,6 +29,7 @@ pub use models::{
     ReinforcementOutcome, Reinforcements, TrustLevel, TrustedKey,
 };
 pub use objects::{ObjectStore, StoredLearning};
+pub use persist::{read_pointer, write_atomic_json, write_pointer};
 pub use signing::{KeyManager, KeyPair, SignatureCheck};
 pub use store::Ledger;
 pub use time::{format_rfc3339_z, parse_rfc3339, UtcTime};
