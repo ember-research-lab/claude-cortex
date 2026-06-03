@@ -60,7 +60,7 @@ fn main() {
     // Phase 5: lazy outcome-gated eviction.
     //
     // After the JSON output is flushed, run a best-effort reconcile-and-prune
-    // step. Any I/O failure is silently ignored so SessionStart never crashes.
+    // step. Any I/O failure is logged to stderr (non-fatal) so SessionStart never crashes.
     // This step is idempotent: already-pruned episodes are a no-op.
     if let Some(ref sr) = state_root {
         run_eviction(sr, project.as_deref());

@@ -40,10 +40,10 @@ pub fn capture_tail(
         Some(path) => {
             let file_len = match std::fs::metadata(path) {
                 Ok(meta) => meta.len(),
-                Err(_) => {
-                    // File absent: no new bytes — no-op.
-                    return Ok(None);
-                }
+                // Absent transcript: no new bytes to record — no-op.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                // Real I/O error (e.g. EACCES): surface to the caller.
+                Err(e) => return Err(e.into()),
             };
             // If the file was truncated/rotated below the prior watermark,
             // reset to capture from the beginning of the new file.
