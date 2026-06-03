@@ -1,0 +1,15 @@
+#!/bin/sh
+# Fallback shim for cortex-pre-compact.
+#
+# Exec's the real binary if installed; otherwise exits cleanly (silent no-op).
+# This is a non-critical hook (async/non-blocking) so missing binaries must
+# never cause noise or block compaction.
+
+NAME=cortex-pre-compact
+for dir in "${CORTEX_BIN_DIR:-$HOME/.local/bin}" "$HOME/.cargo/bin" "${CLAUDE_PLUGIN_ROOT:-}/target/release"; do
+  [ -n "$dir" ] || continue
+  if [ -x "$dir/$NAME" ]; then
+    exec "$dir/$NAME" "$@"
+  fi
+done
+exit 0
