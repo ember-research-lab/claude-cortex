@@ -1,4 +1,5 @@
 [package]
+publish = false
 name = "cortex-hooks"
 version.workspace = true
 edition.workspace = true
