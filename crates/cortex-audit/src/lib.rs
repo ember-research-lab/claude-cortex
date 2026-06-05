@@ -39,6 +39,9 @@ use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
+use std::path::Path;
 
 /// What an agent did. The `principal` is the acting identity (e.g. `agent:acme:reception`,
 /// `human:alice`, `tenant:acme`) — mandatory and bound into the signed hash.
@@ -89,6 +92,14 @@ pub enum ChainStatus {
 pub enum AuditError {
     #[error("the ledger has no signing key; an audit entry must be signed")]
     NoSigningKey,
+    /// A durable ledger's journal could not be read/written (open, append, flush).
+    #[error("audit journal I/O: {0}")]
+    Io(String),
+    /// A recovered journal did not verify clean — it was tampered, truncated
+    /// mid-line, or signed by a key this ledger does not trust. Recovery refuses
+    /// to continue a chain it cannot vouch for. Carries the failing status.
+    #[error("recovered audit journal is not clean: {0:?}")]
+    Corrupt(ChainStatus),
 }
 
 const GENESIS: &str = "genesis";
@@ -182,15 +193,28 @@ pub fn verify_entries_at(
 
 /// The action-audit ledger. Holds the signing key, the hash-chained entries, and
 /// the trusted public keys used at verification.
+///
+/// **Durability.** By default the ledger is in-memory and its trail dies with the
+/// process. [`AuditLedger::recover`] makes it **durable**: each append is
+/// write-through-appended to an on-disk JSONL journal (one [`SignedEntry`] per
+/// line, `write_all` + `flush` — the same on-disk posture as the egress journal),
+/// and a fresh process re-loads + re-verifies the journal and **continues the same
+/// chain** (so the audit trail survives a restart, binary upgrade, or migration).
+/// Truncation of the tail is still only catchable with an out-of-band head pin —
+/// see the module docs and [`AuditLedger::verify_at`].
 pub struct AuditLedger {
     signing: SigningKey,
     key_id: String,
     trusted: HashMap<String, VerifyingKey>,
     entries: Vec<SignedEntry>,
+    /// Append handle for the durable journal; `None` for an in-memory ledger.
+    journal: Option<File>,
 }
 
 impl AuditLedger {
-    /// Open a ledger that signs with `signing`. The signer's own key is trusted.
+    /// Open an **in-memory** ledger that signs with `signing`. The signer's own key
+    /// is trusted. The trail is not persisted; use [`AuditLedger::recover`] for a
+    /// durable, restart-surviving ledger.
     pub fn new(signing: SigningKey) -> Self {
         let vk = signing.verifying_key();
         let key_id = key_id_of(&vk);
@@ -201,7 +225,63 @@ impl AuditLedger {
             key_id,
             trusted,
             entries: Vec::new(),
+            journal: None,
         }
+    }
+
+    /// Open a **durable** ledger backed by the append-only JSONL journal at `path`,
+    /// signing with `signing`.
+    ///
+    /// A missing journal opens an empty chain. An existing journal is loaded and
+    /// **re-verified against `signing`'s key** ([`verify_entries`]); recovery
+    /// **refuses** ([`AuditError::Corrupt`]) to continue a chain that does not
+    /// verify clean — tampered, truncated mid-line, or signed by an untrusted key —
+    /// rather than silently appending onto a chain it cannot vouch for. On success
+    /// the in-memory chain is the recovered one and the next [`append`] continues
+    /// it (correct `seq`/`prev_hash`), write-through to the same file.
+    ///
+    /// Note: this trusts only `signing`'s own key. A journal whose older entries
+    /// were signed by a rotated key must have that key [`trust`](AuditLedger::trust)ed
+    /// — recovery across a rotation is intentionally not silent.
+    ///
+    /// [`append`]: AuditLedger::append
+    pub fn recover(path: &Path, signing: SigningKey) -> Result<Self, AuditError> {
+        let vk = signing.verifying_key();
+        let key_id = key_id_of(&vk);
+        let mut trusted = HashMap::new();
+        trusted.insert(key_id.clone(), vk);
+
+        // Load any existing entries (a missing file is an empty chain).
+        let entries: Vec<SignedEntry> = match std::fs::read_to_string(path) {
+            Ok(text) => text
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(serde_json::from_str)
+                .collect::<Result<_, _>>()
+                .map_err(|e| AuditError::Io(format!("parse journal {}: {e}", path.display())))?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(e) => return Err(AuditError::Io(format!("read {}: {e}", path.display()))),
+        };
+
+        // Never continue a chain we can't vouch for.
+        let status = verify_entries(&entries, &trusted);
+        if status != ChainStatus::Clean {
+            return Err(AuditError::Corrupt(status));
+        }
+
+        let journal = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .map_err(|e| AuditError::Io(format!("open {}: {e}", path.display())))?;
+
+        Ok(Self {
+            signing,
+            key_id,
+            trusted,
+            entries,
+            journal: Some(journal),
+        })
     }
 
     /// Trust an additional public key (e.g. a key that signed older entries after rotation).
@@ -211,6 +291,12 @@ impl AuditLedger {
 
     /// Append an action — signed, with the principal bound into the hash. An audit
     /// entry is **always** signed; there is no unsigned append.
+    ///
+    /// For a durable ledger the entry is **written to disk first** (write-ahead:
+    /// `write_all` + `flush`), and only on a successful write is it added to the
+    /// in-memory chain — so a crash never leaves an in-memory entry the journal is
+    /// missing. A journal write failure surfaces as [`AuditError::Io`] and the
+    /// entry is not recorded.
     pub fn append(&mut self, record: ActionRecord) -> Result<&SignedEntry, AuditError> {
         let seq = self.entries.len() as u64;
         let prev_hash = self
@@ -220,14 +306,27 @@ impl AuditLedger {
             .unwrap_or_else(|| GENESIS.to_string());
         let hash = entry_hash(seq, &prev_hash, &record);
         let signature = self.signing.sign(hash.as_bytes());
-        self.entries.push(SignedEntry {
+        let entry = SignedEntry {
             seq,
             prev_hash,
             hash,
             key_id: self.key_id.clone(),
             signature: hex::encode(signature.to_bytes()),
             record,
-        });
+        };
+
+        // Write-ahead: persist to the journal before the in-memory push, so the
+        // durable trail is never behind memory.
+        if let Some(file) = self.journal.as_mut() {
+            let line = serde_json::to_string(&entry)
+                .map_err(|e| AuditError::Io(format!("serialize audit entry: {e}")))?;
+            file.write_all(line.as_bytes())
+                .and_then(|()| file.write_all(b"\n"))
+                .and_then(|()| file.flush())
+                .map_err(|e| AuditError::Io(format!("append audit journal: {e}")))?;
+        }
+
+        self.entries.push(entry);
         Ok(self.entries.last().expect("just pushed"))
     }
 
@@ -467,6 +566,148 @@ mod tests {
             verify_entries(&tampered, &trusted),
             ChainStatus::HashBreak(0)
         ));
+    }
+
+    /// A unique temp path per test invocation (cross-OS; no external tempfile dep).
+    fn temp_journal(tag: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "cortex-audit-{}-{tag}-{n}.jsonl",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn recover_persists_and_continues_chain_across_restart() {
+        // The per-tenant-box requirement: the audit trail survives a restart and the
+        // SAME chain continues (no fresh seq-0 chain, no lost tail).
+        let path = temp_journal("restart");
+        let _ = std::fs::remove_file(&path);
+        let key = SigningKey::generate(&mut OsRng);
+
+        // "first boot": durable ledger, two actions.
+        let head = {
+            let mut l = AuditLedger::recover(&path, key.clone()).unwrap();
+            l.append(rec("agent:a1", "t1", "send_email")).unwrap();
+            l.append(rec("agent:a1", "t1", "log_note")).unwrap();
+            assert_eq!(l.verify(), ChainStatus::Clean);
+            let (s, h) = l.head().unwrap();
+            (s, h.to_string())
+        }; // ledger dropped → process "restart"
+
+        // "second boot": recover from disk, the chain is intact and continues.
+        let mut l2 = AuditLedger::recover(&path, key.clone()).unwrap();
+        assert_eq!(l2.entries().len(), 2, "the trail was reloaded from disk");
+        assert_eq!(l2.head(), Some((head.0, head.1.as_str())), "same head");
+        assert_eq!(l2.verify(), ChainStatus::Clean);
+
+        let e = l2.append(rec("agent:a1", "t1", "third")).unwrap();
+        assert_eq!(
+            e.seq, 2,
+            "append continues the recovered chain, not a new one"
+        );
+        assert_eq!(e.prev_hash, head.1, "chained onto the recovered head");
+        assert_eq!(l2.verify(), ChainStatus::Clean);
+        assert_eq!(l2.entries().len(), 3);
+
+        // a third boot sees all three, verifying at the pinned head.
+        let (s3, h3) = {
+            let (s, h) = l2.head().unwrap();
+            (s, h.to_string())
+        };
+        drop(l2);
+        let l3 = AuditLedger::recover(&path, key).unwrap();
+        assert_eq!(l3.verify_at((s3, &h3)), ChainStatus::Clean);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn recover_refuses_a_tampered_journal() {
+        // A box whose on-disk trail was rewritten must NOT silently continue it.
+        let path = temp_journal("tamper");
+        let _ = std::fs::remove_file(&path);
+        let key = SigningKey::generate(&mut OsRng);
+        {
+            let mut l = AuditLedger::recover(&path, key.clone()).unwrap();
+            l.append(rec("agent:a1", "t1", "send_email")).unwrap();
+            l.append(rec("agent:a1", "t1", "log_note")).unwrap();
+        }
+        // rewrite the file: flip a signed field in the persisted JSON.
+        let text = std::fs::read_to_string(&path).unwrap();
+        let tampered = text.replace("send_email", "wire_funds");
+        assert_ne!(tampered, text, "tamper must change the bytes");
+        std::fs::write(&path, tampered).unwrap();
+
+        match AuditLedger::recover(&path, key) {
+            Err(AuditError::Corrupt(ChainStatus::HashBreak(0))) => {}
+            Err(e) => panic!("expected Corrupt(HashBreak(0)), got {e:?}"),
+            Ok(_) => panic!("recovery must refuse a tampered journal"),
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn recover_refuses_a_journal_signed_by_an_untrusted_key() {
+        // The journal was written by key A; a box that only trusts key B must not
+        // adopt it (a foreign/forged trail).
+        let path = temp_journal("foreign");
+        let _ = std::fs::remove_file(&path);
+        let key_a = SigningKey::generate(&mut OsRng);
+        {
+            let mut l = AuditLedger::recover(&path, key_a).unwrap();
+            l.append(rec("agent:a1", "t1", "act")).unwrap();
+        }
+        let key_b = SigningKey::generate(&mut OsRng);
+        match AuditLedger::recover(&path, key_b) {
+            Err(AuditError::Corrupt(ChainStatus::UntrustedKey(0))) => {}
+            Err(e) => panic!("expected Corrupt(UntrustedKey(0)), got {e:?}"),
+            Ok(_) => panic!("recovery must refuse an untrusted-key journal"),
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn durable_append_is_on_disk_immediately() {
+        // Write-ahead: after append returns, the entry is already in the journal
+        // (no buffering window where a crash loses it).
+        let path = temp_journal("ondisk");
+        let _ = std::fs::remove_file(&path);
+        let key = SigningKey::generate(&mut OsRng);
+        let mut l = AuditLedger::recover(&path, key.clone()).unwrap();
+        l.append(rec("agent:a1", "t1", "send_email")).unwrap();
+
+        // read it back with an independent verifier (the "second box"): one entry,
+        // verifies clean against the key.
+        let text = std::fs::read_to_string(&path).unwrap();
+        let reloaded: Vec<SignedEntry> = text
+            .lines()
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| serde_json::from_str(s).unwrap())
+            .collect();
+        assert_eq!(reloaded.len(), 1);
+        let trusted = {
+            let mut m = HashMap::new();
+            let vk = key.verifying_key();
+            m.insert(key_id_of(&vk), vk);
+            m
+        };
+        assert_eq!(verify_entries(&reloaded, &trusted), ChainStatus::Clean);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn recover_missing_journal_starts_empty() {
+        let path = temp_journal("missing");
+        let _ = std::fs::remove_file(&path);
+        let key = SigningKey::generate(&mut OsRng);
+        let l = AuditLedger::recover(&path, key).unwrap();
+        assert_eq!(l.entries().len(), 0);
+        assert_eq!(l.head(), None);
+        assert_eq!(l.verify(), ChainStatus::Clean);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
