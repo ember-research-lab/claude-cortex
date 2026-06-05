@@ -2,11 +2,19 @@
 # CI runs: advisories + bans + sources. Enable `licenses` once the allow-list below is tuned.
 [advisories]
 version = 2
-ignore = []
+ignore = [
+    # `paste` (proc macro, transitive via nalgebra -> simba) is archived but
+    # functional; build-time only, no runtime exposure. Revisit if nalgebra
+    # swaps it out upstream.
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained; build-time proc macro via nalgebra/simba" },
+]
 
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Workspace-internal `path = "..."` deps carry no version and register as
+# wildcards; allow those while still denying registry/git wildcards.
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"
