@@ -10,7 +10,8 @@ Cargo.lock.bak
 # Never commit private keys or runtime flock sentinels
 **/.private_key
 **/.*.json.lock
-.claude/
+.claude/*
+!.claude/settings.json
 
 # Per-session mining drafts (content gets promoted to the ledger; the
 # files themselves are scratch and shouldn't track between machines).
