@@ -135,6 +135,49 @@ fn category_str(c: cortex_core::models::LearningCategory) -> &'static str {
     }
 }
 
+/// Returns `true` if the episodic manifest in `state_root` contains any episode
+/// with status `Unconsolidated` or `Consolidating`.
+///
+/// Returns `false` on any I/O error (fail-safe: must never crash SessionStart).
+pub fn has_pending_episodes(state_root: &Path) -> bool {
+    match cortex_episodic::load_manifest(state_root) {
+        Ok(manifest) => manifest.episodes.values().any(|e| e.status.is_pending()),
+        Err(e) => {
+            eprintln!(
+                "cortex-session-start: failed to read episodic manifest \
+                 (treating as no pending episodes): {e}"
+            );
+            false
+        }
+    }
+}
+
+/// Returns the episode IDs of all pending (Unconsolidated or Consolidating)
+/// episodes in `state_root`, sorted for deterministic output.
+///
+/// Returns an empty vec on any I/O error (fail-safe).
+pub fn pending_episode_ids(state_root: &Path) -> Vec<String> {
+    match cortex_episodic::load_manifest(state_root) {
+        Ok(manifest) => {
+            let mut ids: Vec<String> = manifest
+                .episodes
+                .values()
+                .filter(|e| e.status.is_pending())
+                .map(|e| e.episode_id.clone())
+                .collect();
+            ids.sort();
+            ids
+        }
+        Err(e) => {
+            eprintln!(
+                "cortex-session-start: failed to read episodic manifest \
+                 (treating as no pending episodes): {e}"
+            );
+            Vec::new()
+        }
+    }
+}
+
 pub fn write_output(event: &'static str, additional_context: String) {
     if additional_context.is_empty() {
         return;

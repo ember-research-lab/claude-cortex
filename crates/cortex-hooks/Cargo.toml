@@ -21,8 +21,13 @@ path = "src/bin/post_tool_use.rs"
 name = "cortex-session-end"
 path = "src/bin/session_end.rs"
 
+[[bin]]
+name = "cortex-pre-compact"
+path = "src/bin/pre_compact.rs"
+
 [dependencies]
 cortex-core.workspace = true
+cortex-episodic.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true

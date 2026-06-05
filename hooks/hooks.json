@@ -30,6 +30,17 @@
           }
         ]
       }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cortex-pre-compact",
+            "async": true
+          }
+        ]
+      }
     ]
   }
 }

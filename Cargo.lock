@@ -310,6 +310,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "cortex-episodic"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "cortex-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "cortex-handoff"
 version = "0.4.0"
 dependencies = [
@@ -330,6 +343,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "cortex-core",
+ "cortex-episodic",
  "serde",
  "serde_json",
  "tempfile",

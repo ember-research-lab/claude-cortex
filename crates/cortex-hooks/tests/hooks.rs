@@ -1,11 +1,15 @@
-//! End-to-end tests for the three hook binaries: pipe JSON in, parse JSON out.
+//! End-to-end tests for the four hook binaries: pipe JSON in, parse JSON out.
 
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use cortex_core::models::{Identity, LearningCategory};
+use cortex_core::models::{Identity, LearningCategory, OutcomeResult};
 use cortex_core::{Learning, Ledger};
+use cortex_episodic::episode::{EpisodeRecord, EpisodeStatus};
+use cortex_episodic::manifest::manifest_path;
+use cortex_episodic::manifest::save_manifest;
+use cortex_episodic::EpisodeManifest;
 use serde_json::Value;
 use tempfile::TempDir;
 
@@ -221,5 +225,254 @@ fn post_tool_use_suppresses_zero_hit_searches() {
     assert!(
         out.get("hookSpecificOutput").is_none(),
         "zero-hit search should not emit a nudge"
+    );
+}
+
+/// Returns the state_root for a project dir, matching how the hook binaries
+/// derive it: <project>/.claude/cortex/ledger/cortex-state.
+fn state_root_for(project: &Path) -> std::path::PathBuf {
+    project.join(".claude/cortex/ledger").join("cortex-state")
+}
+
+/// Write a minimal fake transcript file and return its path as a String.
+fn write_fake_transcript(dir: &Path, content: &str) -> String {
+    let path = dir.join("transcript.jsonl");
+    std::fs::write(&path, content).unwrap();
+    path.to_string_lossy().into_owned()
+}
+
+/// Load the EpisodeManifest from a project's state root.
+fn load_manifest(project: &Path) -> EpisodeManifest {
+    let sr = state_root_for(project);
+    let path = manifest_path(&sr);
+    if !path.is_file() {
+        return EpisodeManifest::default();
+    }
+    let bytes = std::fs::read(&path).unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+#[test]
+fn pre_compact_auto_creates_episode_with_correct_source() {
+    let project = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let transcript = write_fake_transcript(
+        project.path(),
+        "fake transcript line 1\nfake transcript line 2\n",
+    );
+
+    let stdin = serde_json::json!({
+        "cwd": project.path().to_string_lossy(),
+        "session_id": "session-auto-1",
+        "transcript_path": transcript,
+        "trigger": "auto",
+    })
+    .to_string();
+
+    let (stdout, _stderr) = run_hook_raw("cortex-pre-compact", &[("HOME", home.path())], &stdin);
+
+    // async hook must emit NO stdout JSON
+    assert_eq!(
+        stdout.trim(),
+        "",
+        "pre_compact must emit no stdout (async hook)"
+    );
+
+    // Episode manifest must exist under the state root
+    let manifest = load_manifest(project.path());
+    assert_eq!(
+        manifest.episodes.len(),
+        1,
+        "expected exactly 1 episode in manifest"
+    );
+    let episode = manifest.episodes.values().next().unwrap();
+    assert_eq!(
+        episode.capture_source, "precompact:auto",
+        "capture_source must be precompact:auto"
+    );
+    assert_eq!(episode.session_id, "session-auto-1");
+    assert!(episode.byte_range[1] > 0, "byte_range end should be > 0");
+}
+
+#[test]
+fn pre_compact_manual_creates_episode_with_manual_source() {
+    let project = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let transcript = write_fake_transcript(project.path(), "manual compaction transcript\n");
+
+    let stdin = serde_json::json!({
+        "cwd": project.path().to_string_lossy(),
+        "session_id": "session-manual-1",
+        "transcript_path": transcript,
+        "trigger": "manual",
+    })
+    .to_string();
+
+    let (stdout, _stderr) = run_hook_raw("cortex-pre-compact", &[("HOME", home.path())], &stdin);
+    assert_eq!(stdout.trim(), "", "pre_compact must emit no stdout");
+
+    let manifest = load_manifest(project.path());
+    assert_eq!(manifest.episodes.len(), 1);
+    let episode = manifest.episodes.values().next().unwrap();
+    assert_eq!(
+        episode.capture_source, "precompact:manual",
+        "capture_source must be precompact:manual for trigger=manual"
+    );
+}
+
+#[test]
+fn pre_compact_replay_does_not_double_capture() {
+    let project = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let transcript = write_fake_transcript(project.path(), "stable transcript content\n");
+
+    let stdin = serde_json::json!({
+        "cwd": project.path().to_string_lossy(),
+        "session_id": "session-replay-1",
+        "transcript_path": transcript,
+        "trigger": "auto",
+    })
+    .to_string();
+
+    // First run — should capture 1 episode.
+    run_hook_raw("cortex-pre-compact", &[("HOME", home.path())], &stdin);
+
+    // Second run with identical transcript — must be a no-op.
+    run_hook_raw("cortex-pre-compact", &[("HOME", home.path())], &stdin);
+
+    let manifest = load_manifest(project.path());
+    assert_eq!(
+        manifest.episodes.len(),
+        1,
+        "second run with same watermark must not create a duplicate episode"
+    );
+}
+
+#[test]
+fn session_end_capture_backstop() {
+    let project = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let transcript = write_fake_transcript(project.path(), "session end transcript backstop\n");
+
+    let stdin = serde_json::json!({
+        "cwd": project.path().to_string_lossy(),
+        "session_id": "session-end-bs-1",
+        "transcript_path": transcript,
+        "reason": "normal",
+    })
+    .to_string();
+
+    let (stdout, stderr) = run_hook_raw("cortex-session-end", &[("HOME", home.path())], &stdin);
+
+    // stdout must remain empty (SessionEnd still uses stderr for directives)
+    assert_eq!(stdout.trim(), "", "stdout must be empty for SessionEnd");
+    // Existing directive must still appear
+    assert!(
+        stderr.contains("cortex session-end"),
+        "directive must still appear in stderr"
+    );
+
+    // Episode must be captured
+    let manifest = load_manifest(project.path());
+    assert_eq!(
+        manifest.episodes.len(),
+        1,
+        "session_end must write exactly 1 episode"
+    );
+    let episode = manifest.episodes.values().next().unwrap();
+    assert!(
+        episode.capture_source.starts_with("sessionend:"),
+        "capture_source must start with 'sessionend:'; got: {}",
+        episode.capture_source
+    );
+}
+
+/// Seed a ledger with one learning, record a Success outcome on it, and
+/// return `(learning_id, block_id)` so callers can wire up the episodic
+/// manifest's `promoted_block_ids`.
+fn seed_ledger_with_success_outcome(ledger_path: &std::path::Path) -> (String, String) {
+    std::fs::create_dir_all(ledger_path).unwrap();
+    let ledger = Ledger::open(ledger_path).unwrap();
+    ledger
+        .key_manager()
+        .generate_keypair(&Identity {
+            name: "eviction-test".into(),
+            machine: "ci".into(),
+            email: None,
+        })
+        .unwrap();
+    let learning = Learning::new(
+        LearningCategory::Pattern,
+        "eviction integration test learning",
+        0.85,
+        None,
+    );
+    let learning_id = learning.id.clone();
+    let block = ledger
+        .append_block("eviction-session", vec![learning], true)
+        .unwrap();
+    let block_id = block.id.clone();
+    ledger
+        .record_outcome(&learning_id, OutcomeResult::Success, "integration test")
+        .unwrap();
+    (learning_id, block_id)
+}
+
+#[test]
+fn session_start_run_eviction_prunes_confirmed_episode() {
+    // Build: ledger with a Success outcome for block-X, episodic manifest with a
+    // ConsolidatedPendingConfirmation episode whose promoted_block_ids = [block-X].
+    // Run cortex-session-start; assert the episode file and manifest entry are gone.
+    let project = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+
+    let ledger_path = project.path().join(".claude/cortex/ledger");
+    let (_learning_id, block_id) = seed_ledger_with_success_outcome(&ledger_path);
+
+    // state_root follows hook convention: <ledger_path>/cortex-state
+    let state_root = state_root_for(project.path());
+    let episodic_dir = state_root.join("episodic");
+    std::fs::create_dir_all(&episodic_dir).unwrap();
+
+    // Build a ConsolidatedPendingConfirmation episode whose promoted block matches.
+    let mut ep = EpisodeRecord::new("eviction-session", "precompact:auto", None, [0, 0]);
+    ep.status = EpisodeStatus::ConsolidatedPendingConfirmation;
+    ep.promoted_block_ids = vec![block_id];
+
+    // Write the episode file to disk.
+    let episode_file = episodic_dir.join(ep.filename());
+    let ep_json = serde_json::to_vec(&ep).unwrap();
+    std::fs::write(&episode_file, &ep_json).unwrap();
+
+    // Write the manifest.
+    let mut manifest = EpisodeManifest::default();
+    manifest.episodes.insert(ep.episode_id.clone(), ep.clone());
+    save_manifest(&state_root, &manifest).unwrap();
+
+    // Verify the episode file exists before running the hook.
+    assert!(
+        episode_file.is_file(),
+        "episode file should exist before running session_start"
+    );
+
+    // Run cortex-session-start with the project's cwd.
+    let stdin = serde_json::json!({
+        "cwd": project.path().to_string_lossy(),
+        "session_id": "eviction-session",
+    })
+    .to_string();
+    run_hook("cortex-session-start", &[("HOME", home.path())], &stdin);
+
+    // Assert: the episode file should be gone (pruned by run_eviction).
+    assert!(
+        !episode_file.is_file(),
+        "episode file should be deleted after session_start eviction"
+    );
+
+    // Assert: the manifest entry should be gone too.
+    let manifest_after = load_manifest(project.path());
+    assert!(
+        !manifest_after.episodes.contains_key(&ep.episode_id),
+        "manifest entry should be removed after session_start eviction"
     );
 }

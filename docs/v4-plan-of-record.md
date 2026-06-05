@@ -74,3 +74,7 @@ crates/
 - All 5 v4 crate scaffolds applied: `cortex-similarity`, `cortex-spectral`, `cortex-active-memory`, `cortex-monitor`, `cortex-dream`. Workspace builds clean across 9 crates.
 - **Phase 1 (cortex-similarity) IMPLEMENTED**: hand-rolled BM25 with tokenization, IDF, score_doc/score_query/top_k/pairwise_similarity. Replaces the originally-planned cortex-embeddings (Anthropic API) per user constraint that v4 must work with nothing beyond their CC subscription. 6 unit tests cover tokenization, scoring, ranking, and IDF behavior.
 - Phases 2-5 still scaffolded only (types + stubs that bail with clear "not yet implemented" messages).
+
+## See also
+
+- `docs/episodic-consolidation-spec.md` — additive spec for the episodic-memory tier and STM→LTM consolidation pathway (the `cortex-episodic` crate + Phase A of dreaming). Follows this document's conventions.
