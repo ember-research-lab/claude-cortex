@@ -98,25 +98,32 @@ Measured A/B, recover-only on the same 1M-entry journal (release):
 The 538 MiB removed is exactly the whole-file `String` (= journal size). The remaining
 720 MiB is the resident chain `Vec` — L1b's target.
 
-#### L1b — bounded resident chain  *(next; gated on a product decision)*
+#### L1b — bounded resident chain  ✅ **DONE** (this change)
 
-Stop materializing the whole chain in RAM. Keep only the signing/trusted keys, the chain
-**head** `(seq, hash)`, and a **bounded recent tail window** (configurable, e.g. last 10k).
+The whole chain is no longer materialized in RAM. A durable ledger keeps only the signing/
+trusted keys, a `total` counter (the seq source + `len()`), the journal path, and a
+**bounded recent window** (`RESIDENT_CAP`, default 4096; configurable via
+`recover_with_cap`). The window always holds the head, so `head()`/`append` chaining never
+touch disk.
 
-- **Recovery** verifies each streamed entry against the running `prev_hash` and **drops** it
-  (keeps only head + window). RAM → `O(window)`, not `O(n)`.
-- **Append** advances the head + pushes to the bounded window (evicting the oldest);
-  write-through to disk unchanged.
-- **Reads** (`entries`, `entries_for_tenant` — the SMB board/audit view) become a
-  **disk-backed paged iterator** (seek by line offset), not `&[SignedEntry]`. *This is the
-  public-API blast radius* — the only direct consumer is the SMB `adapter-ledger` (Whale
-  Signal hasn't adopted cortex-audit yet, so we're setting, not breaking, the contract).
-- **Product decision it forces:** the audit/activity view shows a recent window + queries
-  history on demand (paged), rather than "all entries in memory." Needs sign-off before the
-  API change.
+- **Recovery** streams + verifies every entry against the running `prev_hash` and keeps only
+  the last window (batch eviction at 2× → amortized O(1)). RAM → `O(window)`, not `O(n)`.
+- **Append** advances `total`, pushes, evicts the oldest past 2× the cap; write-through
+  unchanged.
+- **Reads** are now `read_range(start_seq, limit)` / `recent(limit)` (owned, lazy: served from
+  the window when in range, else paged from the journal) + `len()`. `entries()` still exists
+  but returns the **resident window** (documented). The only direct consumer is the SMB
+  `adapter-ledger` — Whale Signal hasn't adopted cortex-audit yet, so this *sets* the contract.
+  The disk read path **verifies as it pages** (threads `prev` from genesis, runs the per-entry
+  check on each streamed entry — no extra I/O, the scan already starts at seq 0), so a journal
+  rewritten *after* recover can't hand a paging reader forged history; window reads are
+  already-verified resident data. (Crypto-review of this change: tamper-evidence preserved.)
+- **In-memory ledgers are unchanged** (full chain resident; nowhere to page from) — the entire
+  crypto/tamper test battery is untouched and green.
 
-L1b is what bounds RAM regardless of age (recovery becomes `O(n)` time / `O(1)` memory;
-Layer 2 then bounds the time too).
+Measured @ 1M entries (release): **peak RSS 720 → 9.3 MiB** (vs 1258 MiB pre-L1a) — a ~135×
+cut, and **flat as the journal grows** (resident = the window, not the chain). Recovery
+*time* is still `O(n)` (~29 s @ 1M — it re-verifies the whole chain); bounding that is L2.
 
 ### Layer 2 — segmentation + sealed checkpoints  *(kills restart-time)*
 
@@ -157,8 +164,9 @@ anchor for regulator-grade tamper-evidence, open-Q #6).
 | Phase | Deliverable | Status |
 |---|---|---|
 | **L1a** | Streaming recovery (no whole-file `String`) | ✅ done — non-breaking, −43% recover RSS |
-| **L1b** | Bounded resident chain (tail window) + paged read API + drop adapter's parallel `Vec` | next — gated on the audit-view product decision |
-| **L2** | Segmentation + sealed checkpoints + `verify --full` | bounds restart-time to a constant |
+| **L1b** | Bounded resident window + paged read API (`read_range`/`recent`/`len`) | ✅ done — peak RSS 1258→9.3 MiB @ 1M, flat in N |
+| **L1b (SMB)** | Bump cortex-audit rev; adapter drops its parallel `Vec` + pages; board view uses `recent`/`read_range` | next — SMB-side, no sign-off blocker (adapter is the only consumer) |
+| **L2** | Segmentation + sealed checkpoints + `verify --full` | bounds **restart-time** to a constant (recovery is still O(n) after L1b) |
 | **L3** | Archival to cold storage + crypto-shred erasure | long-horizon retention + residency; ops-heavy, least urgent |
 
 ## 6. Open questions (cross-consumer — needs Whale Signal sign-off)
