@@ -40,7 +40,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 
 /// What an agent did. The `principal` is the acting identity (e.g. `agent:acme:reception`,
@@ -251,14 +251,34 @@ impl AuditLedger {
         let mut trusted = HashMap::new();
         trusted.insert(key_id.clone(), vk);
 
-        // Load any existing entries (a missing file is an empty chain).
-        let entries: Vec<SignedEntry> = match std::fs::read_to_string(path) {
-            Ok(text) => text
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .map(serde_json::from_str)
-                .collect::<Result<_, _>>()
-                .map_err(|e| AuditError::Io(format!("parse journal {}: {e}", path.display())))?,
+        // Load any existing entries (a missing file is an empty chain). Streamed
+        // line-by-line through a buffered reader — never the whole file as one
+        // `String` — so recovery's transient memory is one line, not the journal
+        // size (a multi-hundred-MB journal otherwise needs that much *contiguous*
+        // heap just to load, the acute OOM-on-restart trigger). The recovered
+        // chain itself is still held + verified in full below (bounding the
+        // resident chain is a separate change).
+        let entries: Vec<SignedEntry> = match File::open(path) {
+            Ok(file) => {
+                let reader = BufReader::new(file);
+                let mut entries = Vec::new();
+                for (i, line) in reader.lines().enumerate() {
+                    let line =
+                        line.map_err(|e| AuditError::Io(format!("read {}: {e}", path.display())))?;
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    let entry = serde_json::from_str(&line).map_err(|e| {
+                        AuditError::Io(format!(
+                            "parse journal {} line {}: {e}",
+                            path.display(),
+                            i + 1
+                        ))
+                    })?;
+                    entries.push(entry);
+                }
+                entries
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(AuditError::Io(format!("read {}: {e}", path.display()))),
         };
