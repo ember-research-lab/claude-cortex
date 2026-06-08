@@ -152,42 +152,138 @@ pub fn verify_entries(
     ChainStatus::Clean
 }
 
-/// Verify a single entry against the running `prev` hash + trusted keys: hash
-/// continuity, recomputed-hash match (tamper), mandatory signature, signature
-/// validity. Returns `Some(status)` on the first failure, `None` if the entry is
-/// clean. The one source of per-entry crypto truth — shared by the in-memory
-/// [`verify_entries`] and the durable streaming verifier so they cannot diverge.
-fn verify_step(
+/// The cheap, sequential checks for one entry against the running `prev` hash: chain
+/// continuity, recomputed-hash match (tamper), mandatory signature, trusted signer, and
+/// signature **decode**. Returns the decoded `(key, signature)` ready for the (expensive)
+/// Ed25519 verification, or the failure status. Everything here is fast (SHA-256 + a hex
+/// decode); the actual `verify` is split out so it can be batched/parallelized.
+fn precheck(
     prev: &str,
     e: &SignedEntry,
     trusted: &HashMap<String, VerifyingKey>,
-) -> Option<ChainStatus> {
+) -> Result<(VerifyingKey, ed25519_dalek::Signature), ChainStatus> {
     if e.prev_hash != prev {
-        return Some(ChainStatus::HashBreak(e.seq));
+        return Err(ChainStatus::HashBreak(e.seq));
     }
     // Recompute the hash from the record (incl. principal) — catches tamper.
     if entry_hash(e.seq, &e.prev_hash, &e.record) != e.hash {
-        return Some(ChainStatus::HashBreak(e.seq));
+        return Err(ChainStatus::HashBreak(e.seq));
     }
     // An audit entry MUST be signed — unsigned is a failure, never clean.
     if e.signature.is_empty() || e.key_id.is_empty() {
-        return Some(ChainStatus::Unsigned(e.seq));
+        return Err(ChainStatus::Unsigned(e.seq));
     }
     let Some(vk) = trusted.get(&e.key_id) else {
-        return Some(ChainStatus::UntrustedKey(e.seq));
+        return Err(ChainStatus::UntrustedKey(e.seq));
     };
     let sig_bytes = match hex::decode(&e.signature)
         .ok()
         .and_then(|b| <[u8; 64]>::try_from(b).ok())
     {
         Some(b) => b,
-        None => return Some(ChainStatus::BadSignature(e.seq)),
+        None => return Err(ChainStatus::BadSignature(e.seq)),
     };
-    let sig = ed25519_dalek::Signature::from_bytes(&sig_bytes);
-    if vk.verify(e.hash.as_bytes(), &sig).is_err() {
-        return Some(ChainStatus::BadSignature(e.seq));
+    Ok((*vk, ed25519_dalek::Signature::from_bytes(&sig_bytes)))
+}
+
+/// Verify a single entry against the running `prev` hash + trusted keys (the cheap checks
+/// via [`precheck`] plus the Ed25519 verification). Returns `Some(status)` on the first
+/// failure, `None` if clean. The one source of per-entry crypto truth for the sequential,
+/// in-memory path ([`verify_entries`]); the durable streaming path uses the same [`precheck`]
+/// + a parallel batch of the same `verify` ([`verify_chunk`]) so they cannot diverge.
+fn verify_step(
+    prev: &str,
+    e: &SignedEntry,
+    trusted: &HashMap<String, VerifyingKey>,
+) -> Option<ChainStatus> {
+    match precheck(prev, e, trusted) {
+        Err(status) => Some(status),
+        Ok((vk, sig)) => {
+            if vk.verify(e.hash.as_bytes(), &sig).is_err() {
+                Some(ChainStatus::BadSignature(e.seq))
+            } else {
+                None
+            }
+        }
     }
-    None
+}
+
+/// A chunk size for the durable streaming verifier: entries are read + cheap-checked in
+/// order, then their signatures verified as a batch. Bounds transient memory (the chunk +
+/// its decoded sigs) to `O(chunk)` regardless of journal size, while giving the parallel
+/// pass enough work to amortize thread spawn.
+const VERIFY_CHUNK: usize = 16_384;
+/// Below this many signatures, verify them on the current thread — thread spawn isn't worth
+/// it (tiny journals, the common dev/test case).
+const PARALLEL_VERIFY_THRESHOLD: usize = 256;
+
+/// The expensive Ed25519 verification for a chunk, **parallelized across cores**: returns the
+/// **lowest `seq`** whose signature fails (or `None` if all pass). Each task is independent
+/// (the signature is over that entry's own hash), so this is embarrassingly parallel; the
+/// chain-continuity (sequential) part is already done by the caller via [`precheck`].
+fn min_bad_signature(tasks: &[(VerifyingKey, &str, ed25519_dalek::Signature, u64)]) -> Option<u64> {
+    let bad_in = |part: &[(VerifyingKey, &str, ed25519_dalek::Signature, u64)]| {
+        part.iter()
+            .filter(|(vk, hash, sig, _)| vk.verify(hash.as_bytes(), sig).is_err())
+            .map(|t| t.3)
+            .min()
+    };
+    if tasks.len() < PARALLEL_VERIFY_THRESHOLD {
+        return bad_in(tasks);
+    }
+    let nthreads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .min(tasks.len());
+    let part_size = tasks.len().div_ceil(nthreads);
+    std::thread::scope(|s| {
+        let handles: Vec<_> = tasks
+            .chunks(part_size)
+            .map(|part| s.spawn(move || bad_in(part)))
+            .collect();
+        handles
+            .into_iter()
+            .filter_map(|h| h.join().expect("verify thread panicked"))
+            .min()
+    })
+}
+
+/// Verify one in-order chunk against the running `prev`: the cheap checks sequentially
+/// (threading `prev`, so chain continuity is exact), then the signatures as a parallel batch.
+/// Returns `Err(status)` of the **lowest-seq** failure (identical to a sequential
+/// [`verify_step`] pass), or `Ok(())` if the whole chunk is clean.
+fn verify_chunk(
+    prev_in: &str,
+    chunk: &[SignedEntry],
+    trusted: &HashMap<String, VerifyingKey>,
+) -> Result<(), ChainStatus> {
+    let mut prev = prev_in.to_string();
+    let mut tasks: Vec<(VerifyingKey, &str, ed25519_dalek::Signature, u64)> =
+        Vec::with_capacity(chunk.len());
+    let mut seq_fail: Option<ChainStatus> = None;
+    for e in chunk {
+        match precheck(&prev, e, trusted) {
+            Err(status) => {
+                // A cheap-check failure breaks the chain here; entries after it are moot.
+                // Signature tasks collected so far are all at seq < e.seq.
+                seq_fail = Some(status);
+                break;
+            }
+            Ok((vk, sig)) => {
+                tasks.push((vk, e.hash.as_str(), sig, e.seq));
+                prev = e.hash.clone();
+            }
+        }
+    }
+    // Any signature failure is at a seq below `seq_fail` (tasks stop at the break), so it is
+    // the lowest-seq failure overall — report it first, exactly as sequential verify would.
+    if let Some(bad) = min_bad_signature(&tasks) {
+        return Err(ChainStatus::BadSignature(bad));
+    }
+    if let Some(status) = seq_fail {
+        return Err(status);
+    }
+    Ok(())
 }
 
 /// Stream a durable journal from disk and verify it entry-by-entry without holding
@@ -211,6 +307,23 @@ fn verify_journal(
     };
     let mut prev = GENESIS.to_string();
     let mut head: Option<(u64, String)> = None;
+    let mut chunk: Vec<SignedEntry> = Vec::with_capacity(VERIFY_CHUNK);
+    let flush = |chunk: &mut Vec<SignedEntry>,
+                 prev: &mut String,
+                 head: &mut Option<(u64, String)>|
+     -> Option<ChainStatus> {
+        if chunk.is_empty() {
+            return None;
+        }
+        if let Err(bad) = verify_chunk(prev, chunk, trusted) {
+            return Some(bad);
+        }
+        let last = chunk.last().expect("non-empty");
+        *prev = last.hash.clone();
+        *head = Some((last.seq, last.hash.clone()));
+        chunk.clear();
+        None
+    };
     for line in BufReader::new(file).lines() {
         let line = match line {
             Ok(l) => l,
@@ -233,11 +346,15 @@ fn verify_journal(
                 )
             }
         };
-        if let Some(bad) = verify_step(&prev, &e, trusted) {
-            return (bad, head);
+        chunk.push(e);
+        if chunk.len() >= VERIFY_CHUNK {
+            if let Some(bad) = flush(&mut chunk, &mut prev, &mut head) {
+                return (bad, head);
+            }
         }
-        prev = e.hash.clone();
-        head = Some((e.seq, e.hash));
+    }
+    if let Some(bad) = flush(&mut chunk, &mut prev, &mut head) {
+        return (bad, head);
     }
     (ChainStatus::Clean, head)
 }
@@ -361,14 +478,34 @@ impl AuditLedger {
         trusted.insert(key_id.clone(), vk);
 
         // Stream the journal line-by-line — never the whole file as one `String`
-        // (a multi-hundred-MB journal otherwise needs that much *contiguous* heap
-        // just to load, the acute OOM-on-restart trigger) — verifying each entry as
-        // it is read and keeping only the most-recent `RESIDENT_CAP` window resident.
-        // So recovery is O(1) memory in the journal size: the whole chain is verified,
-        // but only the tail window is retained (older entries page from disk later).
+        // (a multi-hundred-MB journal otherwise needs that much *contiguous* heap just to
+        // load, the acute OOM-on-restart trigger). The whole chain is verified, in
+        // `VERIFY_CHUNK`-sized batches whose **signatures verify in parallel** across cores
+        // (the dominant cost on restart — see `verify_chunk`), but only the most-recent
+        // window is retained. So recovery is O(1) memory in the journal size and roughly
+        // Ncores× faster, while still fully re-verifying every entry.
         let mut prev = GENESIS.to_string();
         let mut total: u64 = 0;
         let mut window: Vec<SignedEntry> = Vec::new();
+        let mut chunk: Vec<SignedEntry> = Vec::with_capacity(VERIFY_CHUNK);
+        let absorb = |chunk: &mut Vec<SignedEntry>,
+                      prev: &mut String,
+                      total: &mut u64,
+                      window: &mut Vec<SignedEntry>|
+         -> Result<(), AuditError> {
+            if chunk.is_empty() {
+                return Ok(());
+            }
+            verify_chunk(prev, chunk, &trusted).map_err(AuditError::Corrupt)?;
+            *prev = chunk.last().expect("non-empty").hash.clone();
+            *total += chunk.len() as u64;
+            window.append(chunk); // moves entries out; `chunk` is now empty
+            if window.len() > 2 * cap {
+                let drop = window.len() - cap; // keep the most-recent `cap`
+                window.drain(0..drop);
+            }
+            Ok(())
+        };
         match File::open(path) {
             Ok(file) => {
                 for (i, line) in BufReader::new(file).lines().enumerate() {
@@ -384,21 +521,16 @@ impl AuditLedger {
                             i + 1
                         ))
                     })?;
-                    // Never continue a chain we can't vouch for — verify as we stream.
-                    if let Some(bad) = verify_step(&prev, &entry, &trusted) {
-                        return Err(AuditError::Corrupt(bad));
-                    }
-                    prev = entry.hash.clone();
-                    total += 1;
-                    window.push(entry);
-                    if window.len() > 2 * cap {
-                        window.drain(0..cap);
+                    chunk.push(entry);
+                    if chunk.len() >= VERIFY_CHUNK {
+                        absorb(&mut chunk, &mut prev, &mut total, &mut window)?;
                     }
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(AuditError::Io(format!("read {}: {e}", path.display()))),
         }
+        absorb(&mut chunk, &mut prev, &mut total, &mut window)?;
 
         let journal = OpenOptions::new()
             .create(true)
@@ -1014,6 +1146,101 @@ mod tests {
         let e = l2.append(rec("agent:a1", "t1", "next")).unwrap();
         assert_eq!(e.seq, n as u64, "append continues after recover+eviction");
         assert_eq!(l2.verify(), ChainStatus::Clean);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn verify_chunk_threads_prev_and_reports_lowest_seq_failure() {
+        // Directly exercise the chunk verifier's continuity + lowest-seq logic (the parts
+        // the streaming loop relies on across VERIFY_CHUNK boundaries) without a >16k fixture.
+        let key = SigningKey::generate(&mut OsRng);
+        let trusted = {
+            let mut m = HashMap::new();
+            let vk = key.verifying_key();
+            m.insert(key_id_of(&vk), vk);
+            m
+        };
+        let mut l = AuditLedger::new(key);
+        for i in 0..6 {
+            l.append(rec("agent:a1", "t1", &format!("a{i}"))).unwrap();
+        }
+        let entries = l.entries().to_vec();
+
+        // whole chunk clean
+        assert_eq!(verify_chunk(GENESIS, &entries, &trusted), Ok(()));
+
+        // cross-boundary prev threading: a clean second half continues from the first half's
+        // head, and a WRONG boundary prev is caught at the first entry of the second half.
+        assert_eq!(verify_chunk(GENESIS, &entries[0..3], &trusted), Ok(()));
+        let mid = entries[2].hash.clone();
+        assert_eq!(verify_chunk(&mid, &entries[3..6], &trusted), Ok(()));
+        assert_eq!(
+            verify_chunk("not-the-real-prev", &entries[3..6], &trusted),
+            Err(ChainStatus::HashBreak(3))
+        );
+
+        // mixed failures in one chunk: a bad signature at seq 2 and a hash tamper at seq 4 →
+        // the LOWER seq (the bad sig) is reported, matching a sequential pass.
+        let mut tampered = entries;
+        let mut sig: Vec<char> = tampered[2].signature.chars().collect();
+        sig[0] = if sig[0] == '0' { '1' } else { '0' };
+        tampered[2].signature = sig.into_iter().collect();
+        tampered[4].record.detail = "tampered".into();
+        assert_eq!(
+            verify_chunk(GENESIS, &tampered, &trusted),
+            Err(ChainStatus::BadSignature(2))
+        );
+    }
+
+    #[test]
+    fn parallel_recover_verifies_clean_and_reports_lowest_bad_signature() {
+        // Exercise the parallel signature-verify path (> PARALLEL_VERIFY_THRESHOLD entries):
+        // a clean chain recovers, and a chain with TWO bad signatures is refused at the
+        // LOWEST seq — identical to a sequential verify, despite cross-thread verification.
+        let path = temp_journal("parallel");
+        let _ = std::fs::remove_file(&path);
+        let key = SigningKey::generate(&mut OsRng);
+        let n = PARALLEL_VERIFY_THRESHOLD + 8; // forces the multi-threaded batch
+        {
+            let mut l = AuditLedger::recover_with_cap(&path, key.clone(), 16).unwrap();
+            for i in 0..n {
+                l.append(rec("agent:a1", "t1", &format!("act{i}"))).unwrap();
+            }
+        }
+        // clean chain recovers + verifies through the parallel path
+        let l = AuditLedger::recover_with_cap(&path, key.clone(), 16).unwrap();
+        assert_eq!(l.len(), n as u64);
+        assert_eq!(l.verify(), ChainStatus::Clean);
+        drop(l);
+
+        // Corrupt the signatures of two entries (seq 5 and seq 200, both valid 128-hex so
+        // they pass decode and fail at the Ed25519 verify — the parallel branch).
+        let mut entries: Vec<SignedEntry> = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let flip = |s: &str| -> String {
+            let mut c: Vec<char> = s.chars().collect();
+            c[0] = if c[0] == '0' { '1' } else { '0' };
+            c.into_iter().collect()
+        };
+        entries[5].signature = flip(&entries[5].signature);
+        entries[200].signature = flip(&entries[200].signature);
+        let rewritten: String = entries
+            .iter()
+            .map(|e| serde_json::to_string(e).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&path, rewritten).unwrap();
+
+        // recover must refuse, reporting the LOWEST bad seq (5), not 200.
+        match AuditLedger::recover_with_cap(&path, key, 16) {
+            Err(AuditError::Corrupt(ChainStatus::BadSignature(5))) => {}
+            Err(e) => panic!("expected Corrupt(BadSignature(5)), got {e:?}"),
+            Ok(_) => panic!("recovery must refuse a chain with bad signatures"),
+        }
         let _ = std::fs::remove_file(&path);
     }
 

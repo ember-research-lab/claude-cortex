@@ -122,8 +122,20 @@ touch disk.
   crypto/tamper test battery is untouched and green.
 
 Measured @ 1M entries (release): **peak RSS 720 → 9.3 MiB** (vs 1258 MiB pre-L1a) — a ~135×
-cut, and **flat as the journal grows** (resident = the window, not the chain). Recovery
-*time* is still `O(n)` (~29 s @ 1M — it re-verifies the whole chain); bounding that is L2.
+cut, and **flat as the journal grows** (resident = the window, not the chain).
+
+#### L1c — parallel signature verification  ✅ **DONE** (the chosen alternative to L2)
+
+After L1b, recovery *time* was still `O(n)` (~29 s @ 1M — it re-verifies the whole chain).
+Rather than take L2's segmentation trade-off to cut it (see below), we cut it **without giving
+up full verification**: restart is signature-verify-bound (~31 µs/entry ≈ Ed25519 verify), and
+per-entry signatures are independent, so they verify **in parallel across cores** while the
+cheap chain-continuity check stays sequential. `recover`/`verify` stream `VERIFY_CHUNK`-sized
+batches; each batch's signatures are checked via `std::thread::scope` (no new dep), reporting
+the same lowest-seq failure a sequential pass would. Measured @ 1M (release, 16 cores):
+**recover 29 s → 6.7 s (~4.3×)**, RAM still flat (~30 MiB transient chunk, independent of N).
+Crypto-reviewed: **SOUND** — every entry's signature still verified on every restart, chain
+continuity exact across chunk boundaries, deterministic lowest-seq failure. No security cost.
 
 ### Layer 2 — segmentation + sealed checkpoints  *(kills restart-time)*
 
@@ -165,9 +177,23 @@ anchor for regulator-grade tamper-evidence, open-Q #6).
 |---|---|---|
 | **L1a** | Streaming recovery (no whole-file `String`) | ✅ done — non-breaking, −43% recover RSS |
 | **L1b** | Bounded resident window + paged read API (`read_range`/`recent`/`len`) | ✅ done — peak RSS 1258→9.3 MiB @ 1M, flat in N |
-| **L1b (SMB)** | Bump cortex-audit rev; adapter drops its parallel `Vec` + pages; board view uses `recent`/`read_range` | next — SMB-side, no sign-off blocker (adapter is the only consumer) |
-| **L2** | Segmentation + sealed checkpoints + `verify --full` | bounds **restart-time** to a constant (recovery is still O(n) after L1b) |
+| **L1b (SMB)** | Adapter drops its parallel `Vec` + reads through to the window | ✅ done — ember-smb-platform #89 (daemon no longer holds the chain twice) |
+| **L1c** | Parallel signature verification on recover/verify | ✅ done — recover 29 s→6.7 s (~4.3×), full verify kept, no security trade-off |
+| **L2** | Segmentation + sealed checkpoints + `verify --full` | **DEFERRED** — see below |
 | **L3** | Archival to cold storage + crypto-shred erasure | long-horizon retention + residency; ops-heavy, least urgent |
+
+### L2 decision — deferred (2026-06-08)
+
+L2's whole mechanism is "don't re-verify what we already checkpointed," which **trades away
+full tamper re-verification on every restart** (a prefix tamper would then only be caught by an
+on-demand `verify --full`, not at boot). That trade only bought *restart speed* — and the
+*dangerous* failure (the OOM-crash-loop) was already removed by L1b, leaving restart merely
+*slow*, on an infrequent event. So instead of taking the security trade-off, **L1c cut
+restart-time ~4× by parallelizing the full verification** — keeping "every entry re-verified on
+every restart," which for a tamper-evident ledger is a feature, not a cost. L2 stays on the
+shelf; revisit only if (a) restart latency on very large ledgers becomes a real operational
+pain even parallelized, or (b) we need **archival** (L3), which segmentation naturally enables.
+If revisited, do it **opt-in** (default = full verify) so operators choose the posture.
 
 ## 6. Open questions (cross-consumer — needs Whale Signal sign-off)
 
