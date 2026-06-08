@@ -56,6 +56,22 @@ pub struct ActionRecord {
 
 /// A signed, hash-chained ledger entry. `hash` covers `(seq, prev_hash, record)`
 /// — the record *includes* the principal — and `signature` is over `hash`.
+///
+/// **Co-signature (optional, additive non-repudiation).** When the acting principal is an agent
+/// with its own key, the entry can carry a *second* signature over the same `hash`:
+/// `agent_signature` by `agent_key_id` (the agent's own Ed25519). The box key still signs the
+/// chain; the agent co-signs its authorship.
+///
+/// What it buys (and what it does **not**): a valid co-signature is **unforgeable** — nobody
+/// without the agent's private key can produce one, so a compromised *agent/orchestrator* cannot
+/// fabricate an action attributed-and-attested to a different agent. It is therefore positive,
+/// non-repudiable evidence that the named agent authored the action. It is **not tamper-proof
+/// against the box-key holder**: because `hash` covers only `(seq, prev_hash, record)` and not the
+/// co-signature fields, whoever holds the box key (the trust root) can *strip* a co-signature
+/// (downgrading an entry to box-only) or write a box-only entry attributing any principal — the
+/// co-sig defends against compromised agents, not against a compromised box key (if that is
+/// compromised the whole ledger is). Both fields default empty (`#[serde(default)]`) so pre-co-sign
+/// journals — and box-only entries like human/tenant approvals — read + verify unchanged.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SignedEntry {
     pub seq: u64,
@@ -65,6 +81,13 @@ pub struct SignedEntry {
     pub key_id: String,
     /// Hex Ed25519 signature over `hash`. Empty ⇒ unsigned ⇒ verification fails.
     pub signature: String,
+    /// Hex Ed25519 public key id of the **co-signing agent** (its own key). Empty ⇒ no co-sig.
+    #[serde(default)]
+    pub agent_key_id: String,
+    /// Hex Ed25519 **agent** signature over `hash`. Empty ⇒ no co-sig. When either co-sig field
+    /// is set, both must be present + valid (and `agent_key_id` trusted) for the chain to verify.
+    #[serde(default)]
+    pub agent_signature: String,
     pub record: ActionRecord,
 }
 
@@ -79,6 +102,10 @@ pub enum ChainStatus {
     UntrustedKey(u64),
     /// An entry with no/empty signature — a FAILURE, never clean.
     Unsigned(u64),
+    /// The **agent co-signature** at `seq` did not verify (present but wrong/malformed).
+    BadAgentSignature(u64),
+    /// The **co-signing agent's** key at `seq` is not in the trusted set (un-issued / unknown).
+    UntrustedAgentKey(u64),
     /// The chain verified internally but does not end at the pinned head
     /// checkpoint — entries were truncated/rolled back, or the checkpoint
     /// belongs to a different fork. Carries the expected `(seq, hash)`.
@@ -96,6 +123,10 @@ pub enum ChainStatus {
 pub enum AuditError {
     #[error("the ledger has no signing key; an audit entry must be signed")]
     NoSigningKey,
+    /// An agent co-signature could not be produced/validated (malformed key/sig, or it did not
+    /// verify over the entry hash). The entry is not committed.
+    #[error("agent co-signature error: {0}")]
+    Signing(String),
     /// A durable ledger's journal could not be read/written (open, append, flush).
     #[error("audit journal I/O: {0}")]
     Io(String),
@@ -130,6 +161,29 @@ fn entry_hash(seq: u64, prev_hash: &str, record: &ActionRecord) -> String {
 
 fn key_id_of(vk: &VerifyingKey) -> String {
     hex::encode(vk.to_bytes())
+}
+
+/// Parse a hex Ed25519 public-key id back into a [`VerifyingKey`] (`None` if malformed / not a
+/// valid point).
+fn verifying_key_from_hex(hex_id: &str) -> Option<VerifyingKey> {
+    let bytes: [u8; 32] = hex::decode(hex_id).ok()?.try_into().ok()?;
+    VerifyingKey::from_bytes(&bytes).ok()
+}
+
+/// Parse a hex Ed25519 signature (`None` if not 64 bytes of hex).
+fn signature_from_hex(hex_sig: &str) -> Option<ed25519_dalek::Signature> {
+    let bytes: [u8; 64] = hex::decode(hex_sig).ok()?.try_into().ok()?;
+    Some(ed25519_dalek::Signature::from_bytes(&bytes))
+}
+
+/// An agent's **co-signature** over an entry's `hash`, returned by the
+/// [`append_co_signed`](AuditLedger::append_co_signed) closure: `key_id` is the hex of the agent's
+/// Ed25519 public key, `signature` the hex of its signature over the hash. The platform's
+/// IdentityService produces this (revealing the agent's vault-sealed key inside the closure).
+#[derive(Clone, Debug)]
+pub struct AgentCoSignature {
+    pub key_id: String,
+    pub signature: String,
 }
 
 /// Verify a chain of entries (e.g. reloaded from disk) against a trusted key set:
@@ -200,12 +254,37 @@ fn verify_step(
         Err(status) => Some(status),
         Ok((vk, sig)) => {
             if vk.verify(e.hash.as_bytes(), &sig).is_err() {
-                Some(ChainStatus::BadSignature(e.seq))
-            } else {
-                None
+                return Some(ChainStatus::BadSignature(e.seq));
             }
+            verify_agent_cosig(e, trusted)
         }
     }
+}
+
+/// Verify the **agent co-signature** when present: both co-sig fields must be set, the agent key
+/// must be trusted (issued, even if since revoked — past authorship stays verifiable), and the
+/// signature must verify over the same `hash` the box key signed. A box-only entry (both fields
+/// empty) is unaffected. A half-present co-sig (one field set, the other empty) is malformed.
+fn verify_agent_cosig(
+    e: &SignedEntry,
+    trusted: &HashMap<String, VerifyingKey>,
+) -> Option<ChainStatus> {
+    if e.agent_key_id.is_empty() && e.agent_signature.is_empty() {
+        return None; // box-only entry — no co-signature to check.
+    }
+    if e.agent_key_id.is_empty() || e.agent_signature.is_empty() {
+        return Some(ChainStatus::BadAgentSignature(e.seq)); // half-present ⇒ malformed.
+    }
+    let Some(avk) = trusted.get(&e.agent_key_id) else {
+        return Some(ChainStatus::UntrustedAgentKey(e.seq));
+    };
+    let Some(asig) = signature_from_hex(&e.agent_signature) else {
+        return Some(ChainStatus::BadAgentSignature(e.seq));
+    };
+    if avk.verify(e.hash.as_bytes(), &asig).is_err() {
+        return Some(ChainStatus::BadAgentSignature(e.seq));
+    }
+    None
 }
 
 /// A chunk size for the durable streaming verifier: entries are read + cheap-checked in
@@ -261,6 +340,11 @@ fn verify_chunk(
     let mut tasks: Vec<(VerifyingKey, &str, ed25519_dalek::Signature, u64)> =
         Vec::with_capacity(chunk.len());
     let mut seq_fail: Option<ChainStatus> = None;
+    // Lowest-seq **agent co-signature** failure in this chunk. Checked inline (co-sigs are the
+    // minority — only agent actions carry one); the box signatures stay in the parallel batch.
+    // This is the durable counterpart of `verify_step`'s `verify_agent_cosig` call — both paths
+    // MUST run it or on-disk recovery would accept a forged co-signature the resident path rejects.
+    let mut cosig_fail: Option<ChainStatus> = None;
     for e in chunk {
         match precheck(&prev, e, trusted) {
             Err(status) => {
@@ -271,19 +355,41 @@ fn verify_chunk(
             }
             Ok((vk, sig)) => {
                 tasks.push((vk, e.hash.as_str(), sig, e.seq));
+                if cosig_fail.is_none() {
+                    cosig_fail = verify_agent_cosig(e, trusted); // first ⇒ lowest-seq (in-order)
+                }
                 prev = e.hash.clone();
             }
         }
     }
-    // Any signature failure is at a seq below `seq_fail` (tasks stop at the break), so it is
-    // the lowest-seq failure overall — report it first, exactly as sequential verify would.
-    if let Some(bad) = min_bad_signature(&tasks) {
-        return Err(ChainStatus::BadSignature(bad));
+    // The chunk's failure is the LOWEST-seq one across the three kinds. `box_fail` and `cosig_fail`
+    // are at seq < `seq_fail` (collection stops at the cheap-check break). `min_by_key` returns the
+    // FIRST of equal minima, so `box_fail` is placed before `cosig_fail`: on a same-seq tie (one
+    // entry with both a bad box sig AND a bad co-sig) the box failure wins — matching `verify_step`,
+    // which checks the box signature before the co-signature, so the two paths report identically.
+    let box_fail = min_bad_signature(&tasks).map(ChainStatus::BadSignature);
+    match [seq_fail, box_fail, cosig_fail]
+        .into_iter()
+        .flatten()
+        .min_by_key(status_seq)
+    {
+        Some(status) => Err(status),
+        None => Ok(()),
     }
-    if let Some(status) = seq_fail {
-        return Err(status);
+}
+
+/// The `seq` a chain-failure status points at (for picking the lowest-seq failure). Non-positional
+/// statuses (`Clean`, `HeadMismatch`, `Io`) sort last; they don't arise as per-entry chunk faults.
+fn status_seq(s: &ChainStatus) -> u64 {
+    match s {
+        ChainStatus::HashBreak(n)
+        | ChainStatus::BadSignature(n)
+        | ChainStatus::UntrustedKey(n)
+        | ChainStatus::Unsigned(n)
+        | ChainStatus::BadAgentSignature(n)
+        | ChainStatus::UntrustedAgentKey(n) => *n,
+        _ => u64::MAX,
     }
-    Ok(())
 }
 
 /// Stream a durable journal from disk and verify it entry-by-entry without holding
@@ -471,11 +577,29 @@ impl AuditLedger {
         signing: SigningKey,
         resident_cap: usize,
     ) -> Result<Self, AuditError> {
+        Self::recover_with_cap_trusting(path, signing, &[], resident_cap)
+    }
+
+    /// [`recover_with_cap`](Self::recover_with_cap) that **also trusts** `agent_keys` while
+    /// re-verifying. A journal containing **agent co-signed** entries can only recover clean when
+    /// the co-signing agents' public keys are trusted (else `UntrustedAgentKey`) — so the caller
+    /// (the platform's IdentityService) supplies the **ever-issued** agent pubkeys here, including
+    /// since-revoked ones (revocation stops *new* signing; it does not retroactively invalidate a
+    /// past, legitimately-signed entry). The box key is always trusted.
+    pub fn recover_with_cap_trusting(
+        path: &Path,
+        signing: SigningKey,
+        agent_keys: &[VerifyingKey],
+        resident_cap: usize,
+    ) -> Result<Self, AuditError> {
         let cap = resident_cap.max(1);
         let vk = signing.verifying_key();
         let key_id = key_id_of(&vk);
         let mut trusted = HashMap::new();
         trusted.insert(key_id.clone(), vk);
+        for ak in agent_keys {
+            trusted.insert(key_id_of(ak), *ak);
+        }
 
         // Stream the journal line-by-line — never the whole file as one `String`
         // (a multi-hundred-MB journal otherwise needs that much *contiguous* heap just to
@@ -564,25 +688,82 @@ impl AuditLedger {
     /// missing. A journal write failure surfaces as [`AuditError::Io`] and the
     /// entry is not recorded.
     pub fn append(&mut self, record: ActionRecord) -> Result<&SignedEntry, AuditError> {
+        let (seq, prev_hash, hash) = self.next_hash(&record);
+        let signature = self.signing.sign(hash.as_bytes());
+        self.commit(SignedEntry {
+            seq,
+            prev_hash,
+            hash,
+            key_id: self.key_id.clone(),
+            signature: hex::encode(signature.to_bytes()),
+            agent_key_id: String::new(),
+            agent_signature: String::new(),
+            record,
+        })
+    }
+
+    /// Append an entry **co-signed by the acting agent**. The box key signs the chain (as
+    /// [`append`](Self::append)); additionally the caller's `agent_sign` closure signs the SAME
+    /// `hash` with the agent's own key and returns its [`AgentCoSignature`]. The agent's public
+    /// key is added to the trusted set so this and future [`verify`](Self::verify) calls accept it
+    /// (its past entries remain verifiable even after the agent is revoked — revocation is enforced
+    /// where the agent *signs*, not in the audit trail). The closure is the only place the agent's
+    /// private key is touched, so the ledger never holds it.
+    ///
+    /// The co-signature is **verified before the entry is committed**: a closure that returns a
+    /// bad/malformed signature fails with [`AuditError::Signing`] and nothing is written.
+    pub fn append_co_signed<F>(
+        &mut self,
+        record: ActionRecord,
+        agent_sign: F,
+    ) -> Result<&SignedEntry, AuditError>
+    where
+        F: FnOnce(&str) -> Result<AgentCoSignature, AuditError>,
+    {
+        let (seq, prev_hash, hash) = self.next_hash(&record);
+        let signature = self.signing.sign(hash.as_bytes());
+        let co = agent_sign(&hash)?;
+        // Reconstruct + validate the agent pubkey, and verify the co-signature now (fail-fast: a
+        // bad closure must not land an unverifiable entry on the chain).
+        let agent_vk = verifying_key_from_hex(&co.key_id)
+            .ok_or_else(|| AuditError::Signing("agent co-sign: malformed agent key id".into()))?;
+        let agent_sig = signature_from_hex(&co.signature).ok_or_else(|| {
+            AuditError::Signing("agent co-sign: malformed agent signature".into())
+        })?;
+        agent_vk
+            .verify(hash.as_bytes(), &agent_sig)
+            .map_err(|_| AuditError::Signing("agent co-sign: signature does not verify".into()))?;
+        self.trusted.insert(co.key_id.clone(), agent_vk);
+        self.commit(SignedEntry {
+            seq,
+            prev_hash,
+            hash,
+            key_id: self.key_id.clone(),
+            signature: hex::encode(signature.to_bytes()),
+            agent_key_id: co.key_id,
+            agent_signature: co.signature,
+            record,
+        })
+    }
+
+    /// `(seq, prev_hash, hash)` for the next entry over `record` — the chain position + content
+    /// hash both signatures are taken over.
+    fn next_hash(&self, record: &ActionRecord) -> (u64, String, String) {
         let seq = self.total;
         let prev_hash = self
             .entries
             .last()
             .map(|e| e.hash.clone())
             .unwrap_or_else(|| GENESIS.to_string());
-        let hash = entry_hash(seq, &prev_hash, &record);
-        let signature = self.signing.sign(hash.as_bytes());
-        let entry = SignedEntry {
-            seq,
-            prev_hash,
-            hash,
-            key_id: self.key_id.clone(),
-            signature: hex::encode(signature.to_bytes()),
-            record,
-        };
+        let hash = entry_hash(seq, &prev_hash, record);
+        (seq, prev_hash, hash)
+    }
 
-        // Write-ahead: persist to the journal before the in-memory push, so the
-        // durable trail is never behind memory.
+    /// Commit a freshly-built entry: write-ahead to the journal (so the durable trail is never
+    /// behind memory), then push + bound the resident window. A journal write failure surfaces as
+    /// [`AuditError::Io`] and the entry is not recorded. Shared by [`append`](Self::append) +
+    /// [`append_co_signed`](Self::append_co_signed).
+    fn commit(&mut self, entry: SignedEntry) -> Result<&SignedEntry, AuditError> {
         if let Some(file) = self.journal.as_mut() {
             let line = serde_json::to_string(&entry)
                 .map_err(|e| AuditError::Io(format!("serialize audit entry: {e}")))?;
@@ -591,13 +772,11 @@ impl AuditLedger {
                 .and_then(|()| file.flush())
                 .map_err(|e| AuditError::Io(format!("append audit journal: {e}")))?;
         }
-
         self.entries.push(entry);
         self.total += 1;
-        // Durable: bound the resident window — evict the oldest `RESIDENT_CAP` once it
-        // grows to 2× (batch eviction → amortized O(1); the evicted entries remain in
-        // the journal, read on demand via `read_range`). In-memory ledgers keep the
-        // whole chain (ephemeral; nowhere to page from).
+        // Durable: bound the resident window — evict the oldest `RESIDENT_CAP` once it grows to 2×
+        // (batch eviction → amortized O(1); evicted entries stay in the journal, read on demand via
+        // `read_range`). In-memory ledgers keep the whole chain (ephemeral; nowhere to page from).
         if self.journal.is_some() && self.entries.len() > 2 * self.resident_cap {
             self.entries.drain(0..self.resident_cap);
         }
@@ -871,6 +1050,8 @@ mod tests {
             // copy a real signature from elsewhere in the chain (replay)
             key_id: l.entries[1].key_id.clone(),
             signature: l.entries[1].signature.clone(),
+            agent_key_id: String::new(),
+            agent_signature: String::new(),
             record: forged_rec,
         };
         l.entries.insert(1, forged);
@@ -1295,5 +1476,219 @@ mod tests {
             // independently derived (python hashlib): sha256(LE(0) || "genesis" || NUL || compact-JSON(record))
             "58d3c40f75ebf6139de85668e34a6b6313488da0ba1924a26f1785aae3b8de8a"
         );
+    }
+
+    // --- agent co-signature (W2.A1) ---
+
+    /// A closure that co-signs an entry's `hash` with `agent` (the IdentityService's role in prod).
+    fn cosign_with(
+        agent: &SigningKey,
+    ) -> impl FnOnce(&str) -> Result<AgentCoSignature, AuditError> + '_ {
+        move |hash: &str| {
+            Ok(AgentCoSignature {
+                key_id: key_id_of(&agent.verifying_key()),
+                signature: hex::encode(agent.sign(hash.as_bytes()).to_bytes()),
+            })
+        }
+    }
+
+    #[test]
+    fn co_signed_entry_carries_both_signatures_and_verifies() {
+        let mut l = ledger();
+        let agent = SigningKey::generate(&mut OsRng);
+        l.append_co_signed(
+            rec("agent:acme:reception", "acme", "send"),
+            cosign_with(&agent),
+        )
+        .unwrap();
+        let e = &l.entries[0];
+        assert!(!e.signature.is_empty(), "box-key chain signature present");
+        assert_eq!(e.agent_key_id, key_id_of(&agent.verifying_key()));
+        assert!(!e.agent_signature.is_empty(), "agent co-signature present");
+        // Both signatures verify; the chain is clean (append_co_signed auto-trusts the agent key).
+        assert_eq!(l.verify(), ChainStatus::Clean);
+    }
+
+    #[test]
+    fn co_signed_entry_fails_when_the_agent_key_is_not_trusted() {
+        let mut l = ledger();
+        let agent = SigningKey::generate(&mut OsRng);
+        l.append_co_signed(
+            rec("agent:acme:reception", "acme", "send"),
+            cosign_with(&agent),
+        )
+        .unwrap();
+        // Verify against a trust set that holds ONLY the box key (the agent key was never issued
+        // to this verifier) → the co-signature can't be vouched for.
+        let mut box_only = HashMap::new();
+        box_only.insert(l.key_id.clone(), l.signing.verifying_key());
+        assert_eq!(
+            verify_entries(&l.entries, &box_only),
+            ChainStatus::UntrustedAgentKey(0)
+        );
+    }
+
+    #[test]
+    fn tampered_agent_signature_is_caught() {
+        let mut l = ledger();
+        let agent = SigningKey::generate(&mut OsRng);
+        l.append_co_signed(
+            rec("agent:acme:reception", "acme", "send"),
+            cosign_with(&agent),
+        )
+        .unwrap();
+        // Replace the agent signature with a valid-shaped but wrong one (sign different bytes).
+        l.entries[0].agent_signature = hex::encode(agent.sign(b"not the hash").to_bytes());
+        assert_eq!(l.verify(), ChainStatus::BadAgentSignature(0));
+    }
+
+    #[test]
+    fn half_present_cosignature_is_malformed() {
+        let mut l = ledger();
+        let agent = SigningKey::generate(&mut OsRng);
+        l.append_co_signed(
+            rec("agent:acme:reception", "acme", "send"),
+            cosign_with(&agent),
+        )
+        .unwrap();
+        // key id set, signature cleared → malformed co-sig, not "box-only".
+        l.entries[0].agent_signature.clear();
+        assert_eq!(l.verify(), ChainStatus::BadAgentSignature(0));
+    }
+
+    #[test]
+    fn append_co_signed_rejects_a_bad_closure_and_commits_nothing() {
+        let mut l = ledger();
+        let agent = SigningKey::generate(&mut OsRng);
+        // Closure returns a signature over the WRONG bytes — it won't verify over the hash.
+        let bad = |_hash: &str| {
+            Ok(AgentCoSignature {
+                key_id: key_id_of(&agent.verifying_key()),
+                signature: hex::encode(agent.sign(b"wrong").to_bytes()),
+            })
+        };
+        let err = l.append_co_signed(rec("agent:acme:reception", "acme", "send"), bad);
+        assert!(matches!(err, Err(AuditError::Signing(_))), "{err:?}");
+        assert_eq!(l.entries.len(), 0, "a rejected co-sign commits nothing");
+        assert_eq!(l.total, 0);
+    }
+
+    #[test]
+    fn durable_verify_catches_a_tampered_agent_cosignature() {
+        // The DURABLE path (verify_journal → verify_chunk) must reject a forged co-signature, not
+        // just the in-memory verify_step. (Regression for the crypto-review finding: the two
+        // verification paths must not diverge.)
+        let path = temp_journal("cosig-tamper");
+        let _ = std::fs::remove_file(&path);
+        let key = SigningKey::generate(&mut OsRng);
+        let agent = SigningKey::generate(&mut OsRng);
+
+        let mut l = AuditLedger::recover_with_cap(&path, key, 8).unwrap();
+        l.append_co_signed(
+            rec("agent:acme:reception", "acme", "send"),
+            cosign_with(&agent),
+        )
+        .unwrap();
+        let good_sig = l.entries[0].agent_signature.clone();
+        assert_eq!(
+            l.verify(),
+            ChainStatus::Clean,
+            "durable verify, agent trusted"
+        );
+
+        // Rewrite the on-disk agent_signature to a valid-shaped but wrong signature, then
+        // re-verify DURABLY (verify() re-reads the journal from disk).
+        let text = std::fs::read_to_string(&path).unwrap();
+        let bad_sig = hex::encode(agent.sign(b"not the hash").to_bytes());
+        let tampered = text.replace(&good_sig, &bad_sig);
+        assert_ne!(tampered, text, "tamper must change the bytes");
+        std::fs::write(&path, tampered).unwrap();
+
+        assert_eq!(
+            l.verify(),
+            ChainStatus::BadAgentSignature(0),
+            "the durable path must catch the forged co-signature"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn recover_needs_the_agent_key_trusted_for_a_co_signed_journal() {
+        // A co-signed journal recovered with only the box key trusted is refused (UntrustedAgentKey)
+        // — recovery won't vouch for an agent it doesn't know. Supplying the issued agent key via
+        // `recover_with_cap_trusting` recovers it clean. (Past entries of a since-revoked agent
+        // still verify, because the caller passes the ever-issued set.)
+        let path = temp_journal("cosig-recover");
+        let _ = std::fs::remove_file(&path);
+        let key = SigningKey::generate(&mut OsRng);
+        let agent = SigningKey::generate(&mut OsRng);
+        {
+            let mut l = AuditLedger::recover_with_cap(&path, key.clone(), 8).unwrap();
+            l.append_co_signed(
+                rec("agent:acme:reception", "acme", "send"),
+                cosign_with(&agent),
+            )
+            .unwrap();
+        }
+        // Box-only trust → the co-signing agent is unknown → recovery refuses.
+        match AuditLedger::recover_with_cap(&path, key.clone(), 8) {
+            Err(AuditError::Corrupt(ChainStatus::UntrustedAgentKey(0))) => {}
+            Err(e) => panic!("expected Corrupt(UntrustedAgentKey(0)), got {e:?}"),
+            Ok(_) => {
+                panic!("recovery must refuse a co-signed journal without the agent key trusted")
+            }
+        }
+        // Re-supply the issued agent key → recovers clean and continues.
+        let l = AuditLedger::recover_with_cap_trusting(&path, key, &[agent.verifying_key()], 8)
+            .unwrap();
+        assert_eq!(l.verify(), ChainStatus::Clean);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn both_verify_paths_agree_on_a_double_fault_entry() {
+        // One entry with BOTH a bad box signature and a bad agent co-signature. The in-memory
+        // (`verify_step`) and durable-chunk (`verify_chunk`) paths must report the SAME status —
+        // the box failure (checked first) wins the same-seq tie on both. (Regression for the
+        // tie-break-order divergence: min_by_key returns the first of equal minima.)
+        let mut l = ledger();
+        let agent = SigningKey::generate(&mut OsRng);
+        l.append_co_signed(
+            rec("agent:acme:reception", "acme", "send"),
+            cosign_with(&agent),
+        )
+        .unwrap();
+        // Corrupt both signatures (valid-shaped, wrong bytes).
+        l.entries[0].signature = hex::encode(l.signing.sign(b"wrong-box").to_bytes());
+        l.entries[0].agent_signature = hex::encode(agent.sign(b"wrong-agent").to_bytes());
+
+        let in_memory = verify_entries(&l.entries, &l.trusted);
+        let durable_chunk = match verify_chunk(GENESIS, &l.entries, &l.trusted) {
+            Ok(()) => ChainStatus::Clean,
+            Err(s) => s,
+        };
+        assert_eq!(in_memory, ChainStatus::BadSignature(0));
+        assert_eq!(
+            in_memory, durable_chunk,
+            "verify_step and verify_chunk must not diverge on the same entry"
+        );
+    }
+
+    #[test]
+    fn box_only_and_co_signed_entries_coexist_on_one_chain() {
+        // Backward-compat + mixed chain: a human approval (box-only) and an agent action
+        // (co-signed) verify together.
+        let mut l = ledger();
+        let agent = SigningKey::generate(&mut OsRng);
+        l.append(rec("human:owner", "acme", "egress.approved"))
+            .unwrap();
+        l.append_co_signed(
+            rec("agent:acme:reception", "acme", "send"),
+            cosign_with(&agent),
+        )
+        .unwrap();
+        assert!(l.entries[0].agent_signature.is_empty(), "box-only entry");
+        assert!(!l.entries[1].agent_signature.is_empty(), "co-signed entry");
+        assert_eq!(l.verify(), ChainStatus::Clean);
     }
 }
