@@ -59,10 +59,11 @@ fn report_recovery(path: &Path) {
     let rec_start = Instant::now();
     let led = AuditLedger::recover(path, key()).expect("recover");
     let rec_secs = rec_start.elapsed().as_secs_f64();
-    let n = led.entries().len() as u64;
+    let n = led.len(); // the FULL chain length (entries() is only the resident window)
+    let resident = led.entries().len();
     let file_bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
 
-    println!("\n=== recover @ N = {n} entries ===");
+    println!("\n=== recover @ N = {n} entries (resident window: {resident}) ===");
     println!(
         "disk:     {:8.1} MiB  ({:.0} bytes/entry)",
         file_bytes as f64 / (1024.0 * 1024.0),

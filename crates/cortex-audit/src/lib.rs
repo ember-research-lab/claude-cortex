@@ -86,6 +86,10 @@ pub enum ChainStatus {
         expected_seq: u64,
         expected_hash: String,
     },
+    /// A durable ledger's journal could not be read while verifying (the chain is
+    /// not held resident, so `verify` re-reads from disk). Not a tamper verdict —
+    /// the journal was unreadable.
+    Io(String),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -140,34 +144,102 @@ pub fn verify_entries(
 ) -> ChainStatus {
     let mut prev = GENESIS.to_string();
     for e in entries {
-        if e.prev_hash != prev {
-            return ChainStatus::HashBreak(e.seq);
-        }
-        // Recompute the hash from the record (incl. principal) — catches tamper.
-        if entry_hash(e.seq, &e.prev_hash, &e.record) != e.hash {
-            return ChainStatus::HashBreak(e.seq);
-        }
-        // An audit entry MUST be signed — unsigned is a failure, never clean.
-        if e.signature.is_empty() || e.key_id.is_empty() {
-            return ChainStatus::Unsigned(e.seq);
-        }
-        let Some(vk) = trusted.get(&e.key_id) else {
-            return ChainStatus::UntrustedKey(e.seq);
-        };
-        let sig_bytes = match hex::decode(&e.signature)
-            .ok()
-            .and_then(|b| <[u8; 64]>::try_from(b).ok())
-        {
-            Some(b) => b,
-            None => return ChainStatus::BadSignature(e.seq),
-        };
-        let sig = ed25519_dalek::Signature::from_bytes(&sig_bytes);
-        if vk.verify(e.hash.as_bytes(), &sig).is_err() {
-            return ChainStatus::BadSignature(e.seq);
+        if let Some(bad) = verify_step(&prev, e, trusted) {
+            return bad;
         }
         prev = e.hash.clone();
     }
     ChainStatus::Clean
+}
+
+/// Verify a single entry against the running `prev` hash + trusted keys: hash
+/// continuity, recomputed-hash match (tamper), mandatory signature, signature
+/// validity. Returns `Some(status)` on the first failure, `None` if the entry is
+/// clean. The one source of per-entry crypto truth — shared by the in-memory
+/// [`verify_entries`] and the durable streaming verifier so they cannot diverge.
+fn verify_step(
+    prev: &str,
+    e: &SignedEntry,
+    trusted: &HashMap<String, VerifyingKey>,
+) -> Option<ChainStatus> {
+    if e.prev_hash != prev {
+        return Some(ChainStatus::HashBreak(e.seq));
+    }
+    // Recompute the hash from the record (incl. principal) — catches tamper.
+    if entry_hash(e.seq, &e.prev_hash, &e.record) != e.hash {
+        return Some(ChainStatus::HashBreak(e.seq));
+    }
+    // An audit entry MUST be signed — unsigned is a failure, never clean.
+    if e.signature.is_empty() || e.key_id.is_empty() {
+        return Some(ChainStatus::Unsigned(e.seq));
+    }
+    let Some(vk) = trusted.get(&e.key_id) else {
+        return Some(ChainStatus::UntrustedKey(e.seq));
+    };
+    let sig_bytes = match hex::decode(&e.signature)
+        .ok()
+        .and_then(|b| <[u8; 64]>::try_from(b).ok())
+    {
+        Some(b) => b,
+        None => return Some(ChainStatus::BadSignature(e.seq)),
+    };
+    let sig = ed25519_dalek::Signature::from_bytes(&sig_bytes);
+    if vk.verify(e.hash.as_bytes(), &sig).is_err() {
+        return Some(ChainStatus::BadSignature(e.seq));
+    }
+    None
+}
+
+/// Stream a durable journal from disk and verify it entry-by-entry without holding
+/// the whole chain in memory (the durable counterpart of [`verify_entries`]).
+/// Returns the terminal `(status, last_head)` — `last_head` is the final
+/// `(seq, hash)` reached (for the truncation/head check), `None` for an empty chain.
+/// `ChainStatus::Io` if the journal can't be read.
+fn verify_journal(
+    path: &Path,
+    trusted: &HashMap<String, VerifyingKey>,
+) -> (ChainStatus, Option<(u64, String)>) {
+    let file = match File::open(path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (ChainStatus::Clean, None),
+        Err(e) => {
+            return (
+                ChainStatus::Io(format!("read {}: {e}", path.display())),
+                None,
+            )
+        }
+    };
+    let mut prev = GENESIS.to_string();
+    let mut head: Option<(u64, String)> = None;
+    for line in BufReader::new(file).lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(e) => {
+                return (
+                    ChainStatus::Io(format!("read {}: {e}", path.display())),
+                    head,
+                )
+            }
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        let e: SignedEntry = match serde_json::from_str(&line) {
+            Ok(e) => e,
+            Err(e) => {
+                return (
+                    ChainStatus::Io(format!("parse {}: {e}", path.display())),
+                    head,
+                )
+            }
+        };
+        if let Some(bad) = verify_step(&prev, &e, trusted) {
+            return (bad, head);
+        }
+        prev = e.hash.clone();
+        head = Some((e.seq, e.hash));
+    }
+    (ChainStatus::Clean, head)
 }
 
 /// [`verify_entries`], plus the truncation/rollback check: the chain must end at
@@ -206,10 +278,31 @@ pub struct AuditLedger {
     signing: SigningKey,
     key_id: String,
     trusted: HashMap<String, VerifyingKey>,
+    /// **Resident** entries. For an **in-memory** ledger this is the whole chain.
+    /// For a **durable** ledger it is the most-recent *window* (the tail, bounded to
+    /// [`RESIDENT_CAP`]); older entries live only in the journal and are read on
+    /// demand via [`read_range`](AuditLedger::read_range) — so RAM stays flat as the
+    /// journal grows, instead of pinning the entire chain. The window always holds the
+    /// head, so [`head`](AuditLedger::head)/[`append`] chaining never touch disk.
     entries: Vec<SignedEntry>,
+    /// Total entries in the chain (= next `seq`). Distinct from `entries.len()` once
+    /// the durable window has evicted older entries.
+    total: u64,
     /// Append handle for the durable journal; `None` for an in-memory ledger.
     journal: Option<File>,
+    /// Journal path — kept so a durable ledger can re-read for [`read_range`] paging
+    /// and streaming [`verify`](AuditLedger::verify). `None` for an in-memory ledger.
+    path: Option<std::path::PathBuf>,
+    /// Durable resident-window cap (see [`RESIDENT_CAP`]). The window is evicted to this
+    /// once it grows to 2×. Configurable via [`AuditLedger::recover_with_cap`].
+    resident_cap: usize,
 }
+
+/// Default max entries held resident in a **durable** ledger's recent-window. Older
+/// entries are evicted from RAM (they stay in the journal, read on demand). Bounds
+/// steady-state memory to ~`RESIDENT_CAP` entries regardless of how large the journal
+/// grows. In-memory ledgers are unbounded (ephemeral; there is no journal to page from).
+pub const RESIDENT_CAP: usize = 4096;
 
 impl AuditLedger {
     /// Open an **in-memory** ledger that signs with `signing`. The signer's own key
@@ -225,7 +318,10 @@ impl AuditLedger {
             key_id,
             trusted,
             entries: Vec::new(),
+            total: 0,
             journal: None,
+            path: None,
+            resident_cap: RESIDENT_CAP,
         }
     }
 
@@ -246,47 +342,62 @@ impl AuditLedger {
     ///
     /// [`append`]: AuditLedger::append
     pub fn recover(path: &Path, signing: SigningKey) -> Result<Self, AuditError> {
+        Self::recover_with_cap(path, signing, RESIDENT_CAP)
+    }
+
+    /// [`recover`](Self::recover) with an explicit resident-window cap (the number of
+    /// most-recent entries kept in RAM; older ones page from disk). Use a small cap in
+    /// tests; the default [`RESIDENT_CAP`] otherwise. A larger cap trades RAM for a
+    /// bigger no-disk recent view.
+    pub fn recover_with_cap(
+        path: &Path,
+        signing: SigningKey,
+        resident_cap: usize,
+    ) -> Result<Self, AuditError> {
+        let cap = resident_cap.max(1);
         let vk = signing.verifying_key();
         let key_id = key_id_of(&vk);
         let mut trusted = HashMap::new();
         trusted.insert(key_id.clone(), vk);
 
-        // Load any existing entries (a missing file is an empty chain). Streamed
-        // line-by-line through a buffered reader — never the whole file as one
-        // `String` — so recovery's transient memory is one line, not the journal
-        // size (a multi-hundred-MB journal otherwise needs that much *contiguous*
-        // heap just to load, the acute OOM-on-restart trigger). The recovered
-        // chain itself is still held + verified in full below (bounding the
-        // resident chain is a separate change).
-        let entries: Vec<SignedEntry> = match File::open(path) {
+        // Stream the journal line-by-line — never the whole file as one `String`
+        // (a multi-hundred-MB journal otherwise needs that much *contiguous* heap
+        // just to load, the acute OOM-on-restart trigger) — verifying each entry as
+        // it is read and keeping only the most-recent `RESIDENT_CAP` window resident.
+        // So recovery is O(1) memory in the journal size: the whole chain is verified,
+        // but only the tail window is retained (older entries page from disk later).
+        let mut prev = GENESIS.to_string();
+        let mut total: u64 = 0;
+        let mut window: Vec<SignedEntry> = Vec::new();
+        match File::open(path) {
             Ok(file) => {
-                let reader = BufReader::new(file);
-                let mut entries = Vec::new();
-                for (i, line) in reader.lines().enumerate() {
+                for (i, line) in BufReader::new(file).lines().enumerate() {
                     let line =
                         line.map_err(|e| AuditError::Io(format!("read {}: {e}", path.display())))?;
                     if line.trim().is_empty() {
                         continue;
                     }
-                    let entry = serde_json::from_str(&line).map_err(|e| {
+                    let entry: SignedEntry = serde_json::from_str(&line).map_err(|e| {
                         AuditError::Io(format!(
                             "parse journal {} line {}: {e}",
                             path.display(),
                             i + 1
                         ))
                     })?;
-                    entries.push(entry);
+                    // Never continue a chain we can't vouch for — verify as we stream.
+                    if let Some(bad) = verify_step(&prev, &entry, &trusted) {
+                        return Err(AuditError::Corrupt(bad));
+                    }
+                    prev = entry.hash.clone();
+                    total += 1;
+                    window.push(entry);
+                    if window.len() > 2 * cap {
+                        window.drain(0..cap);
+                    }
                 }
-                entries
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(AuditError::Io(format!("read {}: {e}", path.display()))),
-        };
-
-        // Never continue a chain we can't vouch for.
-        let status = verify_entries(&entries, &trusted);
-        if status != ChainStatus::Clean {
-            return Err(AuditError::Corrupt(status));
         }
 
         let journal = OpenOptions::new()
@@ -299,8 +410,11 @@ impl AuditLedger {
             signing,
             key_id,
             trusted,
-            entries,
+            entries: window,
+            total,
             journal: Some(journal),
+            path: Some(path.to_path_buf()),
+            resident_cap: cap,
         })
     }
 
@@ -318,7 +432,7 @@ impl AuditLedger {
     /// missing. A journal write failure surfaces as [`AuditError::Io`] and the
     /// entry is not recorded.
     pub fn append(&mut self, record: ActionRecord) -> Result<&SignedEntry, AuditError> {
-        let seq = self.entries.len() as u64;
+        let seq = self.total;
         let prev_hash = self
             .entries
             .last()
@@ -347,36 +461,139 @@ impl AuditLedger {
         }
 
         self.entries.push(entry);
+        self.total += 1;
+        // Durable: bound the resident window — evict the oldest `RESIDENT_CAP` once it
+        // grows to 2× (batch eviction → amortized O(1); the evicted entries remain in
+        // the journal, read on demand via `read_range`). In-memory ledgers keep the
+        // whole chain (ephemeral; nowhere to page from).
+        if self.journal.is_some() && self.entries.len() > 2 * self.resident_cap {
+            self.entries.drain(0..self.resident_cap);
+        }
         Ok(self.entries.last().expect("just pushed"))
     }
 
     /// Verify the whole chain: hash continuity, recomputed-hash match (tamper),
-    /// **mandatory** signature, and signature validity against a trusted key.
+    /// **mandatory** signature, and signature validity against a trusted key. For a
+    /// durable ledger (the chain is not held resident) this **re-reads the journal
+    /// from disk**, streaming — `O(n)` time, `O(1)` memory; for an in-memory ledger it
+    /// verifies the resident chain.
     ///
     /// **Cannot detect truncation** — use [`AuditLedger::verify_at`] with the
     /// out-of-band head checkpoint (see the module docs).
     pub fn verify(&self) -> ChainStatus {
-        verify_entries(&self.entries, &self.trusted)
+        match &self.path {
+            Some(path) => verify_journal(path, &self.trusted).0,
+            None => verify_entries(&self.entries, &self.trusted),
+        }
     }
 
     /// [`AuditLedger::verify`], plus the truncation/rollback check against a
-    /// pinned `(seq, hash)` head checkpoint (see the module docs).
+    /// pinned `(seq, hash)` head checkpoint (see the module docs). Durable: streams
+    /// the journal, then checks the final entry equals the pinned head.
     pub fn verify_at(&self, expected_head: (u64, &str)) -> ChainStatus {
-        verify_entries_at(&self.entries, &self.trusted, expected_head)
+        let Some(path) = &self.path else {
+            return verify_entries_at(&self.entries, &self.trusted, expected_head);
+        };
+        let (status, last) = verify_journal(path, &self.trusted);
+        if status != ChainStatus::Clean {
+            return status;
+        }
+        let (expected_seq, expected_hash) = expected_head;
+        match last {
+            Some((seq, hash)) if seq == expected_seq && hash == expected_hash => ChainStatus::Clean,
+            _ => ChainStatus::HeadMismatch {
+                expected_seq,
+                expected_hash: expected_hash.to_string(),
+            },
+        }
     }
 
     /// The `(seq, hash)` head checkpoint after the last append. Consumers record
     /// this out-of-band and later verify with [`AuditLedger::verify_at`] —
     /// without it, truncation of the tail is undetectable. `None` when empty.
+    /// Always resident (the window keeps the head), so this never touches disk.
     pub fn head(&self) -> Option<(u64, &str)> {
         self.entries.last().map(|e| (e.seq, e.hash.as_str()))
     }
 
+    /// Total entries in the chain (the full length, not just the resident window).
+    pub fn len(&self) -> u64 {
+        self.total
+    }
+
+    /// Whether the chain is empty.
+    pub fn is_empty(&self) -> bool {
+        self.total == 0
+    }
+
+    /// The **resident** entries: the whole chain for an in-memory ledger, or the most
+    /// recent window ([`RESIDENT_CAP`]) for a durable one. For the full history of a
+    /// durable ledger, page with [`read_range`](Self::read_range) — `entries()` is not
+    /// guaranteed to start at seq 0 once the durable window has evicted older entries.
     pub fn entries(&self) -> &[SignedEntry] {
         &self.entries
     }
 
-    /// Entries for a tenant (the platform's board view).
+    /// Read `[start_seq, start_seq + limit)` from the chain — served from the resident
+    /// window when the range falls within it (no disk), else paged from the journal.
+    /// The lazy-fetch read path for the audit/board view: recent pages are RAM-cheap,
+    /// older pages stream from disk on demand. Owned, since older entries aren't resident.
+    pub fn read_range(&self, start_seq: u64, limit: usize) -> Result<Vec<SignedEntry>, AuditError> {
+        if limit == 0 || start_seq >= self.total {
+            return Ok(Vec::new());
+        }
+        let end = start_seq.saturating_add(limit as u64).min(self.total);
+        let window_start = self.total - self.entries.len() as u64;
+        if start_seq >= window_start {
+            // Fast path: entirely within the resident window.
+            let lo = (start_seq - window_start) as usize;
+            let hi = (end - window_start) as usize;
+            return Ok(self.entries[lo..hi].to_vec());
+        }
+        // Older than the window → page from the journal (durable only; an in-memory
+        // ledger's window_start is 0 so it never reaches here).
+        let Some(path) = &self.path else {
+            return Ok(Vec::new());
+        };
+        let file = File::open(path)
+            .map_err(|e| AuditError::Io(format!("read {}: {e}", path.display())))?;
+        // The disk path **verifies as it pages**: it threads `prev` from GENESIS and runs
+        // `verify_step` on every entry it streams (the scan already starts at seq 0, so this
+        // is no extra I/O) — so a journal rewritten *after* recover cannot hand a trusting
+        // reader forged history; a tampered entry up to `end` surfaces as `Corrupt`. (Reads
+        // served from the resident window are already-verified data, so they need no re-check.)
+        let mut prev = GENESIS.to_string();
+        let mut out = Vec::new();
+        for line in BufReader::new(file).lines() {
+            let line = line.map_err(|e| AuditError::Io(format!("read {}: {e}", path.display())))?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let e: SignedEntry = serde_json::from_str(&line)
+                .map_err(|e| AuditError::Io(format!("parse {}: {e}", path.display())))?;
+            if e.seq >= end {
+                break;
+            }
+            if let Some(bad) = verify_step(&prev, &e, &self.trusted) {
+                return Err(AuditError::Corrupt(bad));
+            }
+            prev = e.hash.clone();
+            if e.seq >= start_seq {
+                out.push(e);
+            }
+        }
+        Ok(out)
+    }
+
+    /// The most recent `limit` entries (newest-last), served from the resident window
+    /// when possible. The board's default "recent activity" read.
+    pub fn recent(&self, limit: usize) -> Result<Vec<SignedEntry>, AuditError> {
+        let start = self.total.saturating_sub(limit as u64);
+        self.read_range(start, limit)
+    }
+
+    /// Entries for a tenant within the resident window (the board's recent view). For
+    /// older history use [`read_range`](Self::read_range) and filter.
     pub fn entries_for_tenant<'a>(&'a self, tenant: &str) -> impl Iterator<Item = &'a SignedEntry> {
         let tenant = tenant.to_string();
         self.entries
@@ -727,6 +944,110 @@ mod tests {
         assert_eq!(l.entries().len(), 0);
         assert_eq!(l.head(), None);
         assert_eq!(l.verify(), ChainStatus::Clean);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn durable_window_bounds_resident_and_pages_full_history() {
+        // The L1b property: a durable ledger past the window cap keeps only a bounded
+        // recent window resident (RAM flat in chain length), while the FULL history is
+        // still reachable + verifiable from disk.
+        let path = temp_journal("window");
+        let _ = std::fs::remove_file(&path);
+        let key = SigningKey::generate(&mut OsRng);
+        let cap = 8; // tiny cap so a handful of appends crosses eviction (fast in debug)
+        let n = 2 * cap + 5; // forces at least one eviction
+        let mut l = AuditLedger::recover_with_cap(&path, key, cap).unwrap();
+        for i in 0..n {
+            l.append(rec("agent:a1", "t1", &format!("act{i}"))).unwrap();
+        }
+        assert_eq!(l.len(), n as u64, "len() is the full chain");
+        assert!(
+            l.entries().len() <= 2 * cap,
+            "resident window is bounded ({} entries)",
+            l.entries().len()
+        );
+        assert!(l.entries().len() < n, "older entries were evicted from RAM");
+        assert_eq!(l.head().unwrap().0, (n - 1) as u64, "head is the true last");
+        assert_eq!(l.verify(), ChainStatus::Clean, "streamed full verify");
+
+        // Page the OLDEST entries (below the window) — must come from disk, correct.
+        let oldest = l.read_range(0, 3).unwrap();
+        assert_eq!(oldest.len(), 3);
+        assert_eq!(oldest[0].seq, 0);
+        assert_eq!(oldest[0].record.kind, "act0");
+        assert_eq!(oldest[2].seq, 2);
+
+        // recent() serves the newest from the resident window.
+        let recent = l.recent(2).unwrap();
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[1].seq, (n - 1) as u64);
+        assert_eq!(recent[1].record.kind, format!("act{}", n - 1));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn recover_bounds_window_and_continues_after_eviction() {
+        // Restart of a large durable ledger: recovery rebuilds a BOUNDED window (not
+        // the whole chain), keeps the right total, verifies, pages full history, and a
+        // subsequent append continues the chain with the correct seq.
+        let path = temp_journal("recover-window");
+        let _ = std::fs::remove_file(&path);
+        let key = SigningKey::generate(&mut OsRng);
+        let cap = 8;
+        let n = 2 * cap + 5;
+        {
+            let mut l = AuditLedger::recover_with_cap(&path, key.clone(), cap).unwrap();
+            for i in 0..n {
+                l.append(rec("agent:a1", "t1", &format!("a{i}"))).unwrap();
+            }
+        }
+        let mut l2 = AuditLedger::recover_with_cap(&path, key, cap).unwrap();
+        assert_eq!(l2.len(), n as u64);
+        assert!(l2.entries().len() <= 2 * cap, "recover bounds the window");
+        assert_eq!(l2.verify(), ChainStatus::Clean);
+        assert_eq!(
+            l2.read_range(0, 1).unwrap()[0].seq,
+            0,
+            "seq 0 still on disk"
+        );
+        let e = l2.append(rec("agent:a1", "t1", "next")).unwrap();
+        assert_eq!(e.seq, n as u64, "append continues after recover+eviction");
+        assert_eq!(l2.verify(), ChainStatus::Clean);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn read_range_disk_path_catches_post_recover_tamper() {
+        // The L1b read path is a verification boundary: after a clean recover, an
+        // attacker who rewrites the on-disk journal must not be able to hand a paging
+        // reader forged history — read_range verifies as it pages from disk.
+        let path = temp_journal("read-tamper");
+        let _ = std::fs::remove_file(&path);
+        let key = SigningKey::generate(&mut OsRng);
+        let cap = 8;
+        let n = 2 * cap + 5; // seq 0 is well below the resident window
+        let l = {
+            let mut l = AuditLedger::recover_with_cap(&path, key.clone(), cap).unwrap();
+            for i in 0..n {
+                l.append(rec("agent:a1", "t1", &format!("act{i}"))).unwrap();
+            }
+            l
+        };
+        // a clean below-window page is fine
+        assert_eq!(l.read_range(0, 1).unwrap()[0].record.kind, "act0");
+
+        // rewrite the journal on disk (the file-rewrite adversary), flipping seq 0.
+        let text = std::fs::read_to_string(&path).unwrap();
+        let tampered = text.replacen("act0", "wire_funds", 1);
+        assert_ne!(tampered, text, "tamper must change the bytes");
+        std::fs::write(&path, tampered).unwrap();
+
+        // paging that entry from disk now fails closed — not silently forged.
+        match l.read_range(0, 1) {
+            Err(AuditError::Corrupt(ChainStatus::HashBreak(0))) => {}
+            other => panic!("read_range must reject tampered disk data, got {other:?}"),
+        }
         let _ = std::fs::remove_file(&path);
     }
 
