@@ -13,6 +13,7 @@ members = [
     "crates/cortex-dream",
     "crates/cortex-handoff",
     "crates/cortex-episodic",
+    "crates/cortex-confidence",
 ]
 
 [workspace.package]
@@ -78,6 +79,7 @@ cortex-spectral = { path = "crates/cortex-spectral" }
 cortex-active-memory = { path = "crates/cortex-active-memory" }
 cortex-monitor = { path = "crates/cortex-monitor" }
 cortex-handoff = { path = "crates/cortex-handoff" }
+cortex-confidence = { path = "crates/cortex-confidence" }
 
 # Filesystem helpers
 tempfile = "3"
