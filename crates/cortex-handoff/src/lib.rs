@@ -34,6 +34,38 @@ use cortex_core::time::UtcTime;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// A structured **work-order**: the orchestrator's plan an implementer executes against and the
+/// verifier checks. The spec-as-artifact (see `docs/spec-handoff-artifact.md`) — it is *state*, not a
+/// durable ledger learning, so it lives in the append-only, retrievable handoff tier. `acceptance` is
+/// the falsifier spec made durable: a cheap implementer fills the "geometry" of `intent`; the verifier
+/// confirms against `acceptance`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkOrder {
+    /// What to achieve, in one line.
+    pub goal: String,
+    /// The orchestrator's plan / approach (the "geometry" the implementer fills in).
+    pub intent: String,
+    /// Falsifier / acceptance criteria — how the verifier confirms the work is done correctly.
+    pub acceptance: Vec<String>,
+    /// The files / areas in play (keeps a cheaper implementer on-rails).
+    pub scope_files: Vec<String>,
+    /// Explicit out-of-scope items (prevents over-reach).
+    pub non_goals: Vec<String>,
+}
+
+/// Visibility scope of a handoff — the multi-user model (see
+/// `ember-smb-platform/design/shared-ledger-scoping.md`). Default `Shared` (default-shared,
+/// opt-in-private): a work-order exists to be picked up by another executor.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Scope {
+    /// Visible to all users of the repo / business.
+    #[default]
+    Shared,
+    /// Personal to one user (a private pause-note).
+    User(String),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Handoff {
     pub handoff_id: String,
@@ -49,6 +81,12 @@ pub struct Handoff {
     pub modified_files: Vec<String>,
     #[serde(default)]
     pub context_notes: String,
+    /// Optional structured work-order — the spec an implementer executes against. State, retrievable.
+    #[serde(default)]
+    pub work_order: Option<WorkOrder>,
+    /// Visibility scope (default `Shared`).
+    #[serde(default)]
+    pub scope: Scope,
 }
 
 impl Handoff {
@@ -62,6 +100,8 @@ impl Handoff {
             blockers: Vec::new(),
             modified_files: Vec::new(),
             context_notes: String::new(),
+            work_order: None,
+            scope: Scope::default(),
         }
     }
 
@@ -87,6 +127,18 @@ impl Handoff {
 
     pub fn with_context(mut self, notes: impl Into<String>) -> Self {
         self.context_notes = notes.into();
+        self
+    }
+
+    /// Attach a structured work-order (the spec an implementer executes against).
+    pub fn with_work_order(mut self, work_order: WorkOrder) -> Self {
+        self.work_order = Some(work_order);
+        self
+    }
+
+    /// Set the visibility scope (default is [`Scope::Shared`]).
+    pub fn with_scope(mut self, scope: Scope) -> Self {
+        self.scope = scope;
         self
     }
 }
@@ -193,6 +245,42 @@ mod tests {
             current_pointer_path(root),
             PathBuf::from("/tmp/cortex-state/handoffs/current")
         );
+    }
+
+    #[test]
+    fn legacy_handoff_json_without_work_order_or_scope_deserializes_with_defaults() {
+        // A handoff written before WorkOrder/Scope existed must still load — backward compatibility.
+        let legacy = r#"{
+            "handoff_id": "h1",
+            "session_id": "s1",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "context_notes": "paused at line 240"
+        }"#;
+        let h: Handoff = serde_json::from_str(legacy).unwrap();
+        assert_eq!(h.handoff_id, "h1");
+        assert!(h.work_order.is_none());
+        assert_eq!(h.scope, Scope::Shared); // default-shared
+        assert_eq!(h.context_notes, "paused at line 240");
+    }
+
+    #[test]
+    fn work_order_round_trips_through_disk() {
+        let dir = TempDir::new().unwrap();
+        let wo = WorkOrder {
+            goal: "add O(1) provenance retrieval".into(),
+            intent: "index by subject; expose fact_view".into(),
+            acceptance: vec!["fetch by subject is O(1)".into(), "tests green".into()],
+            scope_files: vec!["src/provenance.rs".into()],
+            non_goals: vec!["no new substrate".into()],
+        };
+        let h = Handoff::new("s1")
+            .with_work_order(wo.clone())
+            .with_scope(Scope::User("alice".into()));
+        record_handoff(dir.path(), &h).unwrap();
+        let loaded = read_current(dir.path()).unwrap().unwrap();
+        assert_eq!(loaded.work_order.as_ref(), Some(&wo));
+        assert_eq!(loaded.work_order.unwrap().acceptance.len(), 2);
+        assert_eq!(loaded.scope, Scope::User("alice".into()));
     }
 
     #[test]
