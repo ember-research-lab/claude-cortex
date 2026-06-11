@@ -19,6 +19,8 @@ allow-wildcard-paths = true
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+# Org-internal shared crypto crate (public repo, MIT). Pinned by tag in the workspace manifest.
+allow-git = ["https://github.com/ember-research-lab/ember-crypto"]
 
 [licenses]
 version = 2

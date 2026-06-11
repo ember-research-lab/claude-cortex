@@ -35,6 +35,10 @@ sha2 = "0.10"
 blake3 = "1"
 rand = "0.8"
 
+# Shared org crypto surface (sign/verify/hash behind a crypto-agility interface). Cortex stays on
+# Ed25519 for substrate compatibility, so it pulls the crate with PQC OFF (default-features = false).
+ember-crypto = { git = "https://github.com/ember-research-lab/ember-crypto", tag = "v0.1.0", default-features = false }
+
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

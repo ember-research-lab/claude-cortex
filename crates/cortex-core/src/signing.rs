@@ -10,14 +10,20 @@
 use std::path::{Path, PathBuf};
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey, SECRET_KEY_LENGTH};
-use rand::rngs::OsRng;
+use ember_crypto::{
+    alg, Ed25519Scheme, PublicKey as EcPublicKey, SecretKey as EcSecretKey,
+    Signature as EcSignature, SignatureScheme,
+};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::error::{Error, Result};
 use crate::models::{Identity, TrustLevel, TrustedKey};
 use crate::time::UtcTime;
+
+/// Raw Ed25519 key/signature byte lengths — kept local now that signing routes through ember-crypto
+/// instead of pulling the dalek constants. The on-disk `.private_key` is the 32-byte secret seed.
+const SECRET_KEY_LENGTH: usize = 32;
+const SIGNATURE_LENGTH: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignatureCheck {
@@ -85,9 +91,15 @@ impl KeyManager {
             return Err(Error::KeypairExists(self.identity_path()));
         }
         std::fs::create_dir_all(&self.root).map_err(|e| Error::io(&self.root, e))?;
-        let signing_key = SigningKey::generate(&mut OsRng);
-        let verifying_key = signing_key.verifying_key();
-        let public_bytes = verifying_key.to_bytes();
+        let keypair = Ed25519Scheme
+            .generate()
+            .map_err(|e| Error::Crypto(format!("keygen: {e}")))?;
+        let public_bytes: [u8; 32] = keypair
+            .public
+            .bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| Error::Crypto("public key length".to_string()))?;
         let key_id = compute_key_id(&public_bytes);
         let created_at = UtcTime::now();
 
@@ -100,11 +112,11 @@ impl KeyManager {
         crate::objects::write_atomic_json(&self.identity_path(), &identity_file)?;
 
         let private_path = self.private_key_path();
-        std::fs::write(&private_path, signing_key.to_bytes())
+        // `.private_key` stays the raw 32-byte secret seed — same on-disk format as before.
+        std::fs::write(&private_path, &keypair.secret.bytes)
             .map_err(|e| Error::io(&private_path, e))?;
         set_private_mode(&private_path)?;
 
-        let _ = signing_key; // signing key is read back from disk on demand
         Ok(KeyPair {
             key_id,
             public_key: public_bytes,
@@ -140,7 +152,7 @@ impl KeyManager {
         Ok(Some(array))
     }
 
-    fn load_signing_key(&self) -> Result<Option<SigningKey>> {
+    fn load_private_key_bytes(&self) -> Result<Option<[u8; SECRET_KEY_LENGTH]>> {
         let path = self.private_key_path();
         if !path.is_file() {
             return Ok(None);
@@ -155,18 +167,24 @@ impl KeyManager {
         }
         let mut bytes = [0u8; SECRET_KEY_LENGTH];
         bytes.copy_from_slice(&raw);
-        Ok(Some(SigningKey::from_bytes(&bytes)))
+        Ok(Some(bytes))
     }
 
     pub fn sign_block_hash(&self, block_hash: &str) -> Result<Option<(String, String)>> {
         let Some(key_id) = self.key_id()? else {
             return Ok(None);
         };
-        let Some(signing) = self.load_signing_key()? else {
+        let Some(secret_bytes) = self.load_private_key_bytes()? else {
             return Ok(None);
         };
-        let signature: Signature = signing.sign(block_hash.as_bytes());
-        let encoded = BASE64.encode(signature.to_bytes());
+        let secret = EcSecretKey {
+            algorithm: alg::ED25519,
+            bytes: secret_bytes.to_vec(),
+        };
+        let signature = Ed25519Scheme
+            .sign(&secret, block_hash.as_bytes())
+            .map_err(|e| Error::Crypto(format!("sign: {e}")))?;
+        let encoded = BASE64.encode(&signature.bytes);
         Ok(Some((key_id, encoded)))
     }
 
@@ -179,24 +197,30 @@ impl KeyManager {
         let signature_bytes = BASE64
             .decode(signature_b64)
             .map_err(|e| Error::Crypto(format!("base64 signature: {e}")))?;
-        let signature = match Signature::from_slice(&signature_bytes) {
-            Ok(s) => s,
-            Err(_) => return Ok(SignatureCheck::InvalidSignature),
-        };
+        // Preserve the prior ordering: a wrong-length signature is InvalidSignature before key lookup.
+        if signature_bytes.len() != SIGNATURE_LENGTH {
+            return Ok(SignatureCheck::InvalidSignature);
+        }
         let public = self.lookup_public_key(key_id)?;
         match public {
             Some((bytes, trust)) => {
                 if matches!(trust, TrustLevel::None) {
                     return Ok(SignatureCheck::Untrusted);
                 }
-                let verifying = match VerifyingKey::from_bytes(&bytes) {
-                    Ok(v) => v,
-                    Err(_) => return Ok(SignatureCheck::InvalidSignature),
+                let public_key = EcPublicKey {
+                    algorithm: alg::ED25519,
+                    bytes: bytes.to_vec(),
                 };
-                Ok(match verifying.verify(block_hash.as_bytes(), &signature) {
-                    Ok(()) => SignatureCheck::Valid,
-                    Err(_) => SignatureCheck::InvalidSignature,
-                })
+                let signature = EcSignature {
+                    algorithm: alg::ED25519,
+                    bytes: signature_bytes,
+                };
+                Ok(
+                    match Ed25519Scheme.verify(&public_key, block_hash.as_bytes(), &signature) {
+                        Ok(()) => SignatureCheck::Valid,
+                        Err(_) => SignatureCheck::InvalidSignature,
+                    },
+                )
             }
             None => Ok(SignatureCheck::UnknownKey),
         }
@@ -248,9 +272,12 @@ impl KeyManager {
 }
 
 pub fn compute_key_id(public_key_bytes: &[u8]) -> String {
-    let digest = Sha256::digest(public_key_bytes);
-    let hex = hex::encode(digest);
-    hex[..6].to_uppercase()
+    // Delegate to the shared crate so the org has one key-id construction. Byte-identical to the
+    // previous local impl: first 6 hex chars (uppercase) of SHA-256(public_key_bytes).
+    ember_crypto::key_id(&EcPublicKey {
+        algorithm: alg::ED25519,
+        bytes: public_key_bytes.to_vec(),
+    })
 }
 
 #[cfg(unix)]
