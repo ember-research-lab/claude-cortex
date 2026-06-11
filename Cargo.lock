@@ -294,10 +294,9 @@ dependencies = [
  "base64",
  "blake3",
  "chrono",
- "ed25519-dalek",
+ "ember-crypto",
  "fs2",
  "hex",
- "rand",
  "serde",
  "serde_json",
  "sha2",
@@ -576,6 +575,17 @@ dependencies = [
  "serde",
  "sha2",
  "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "ember-crypto"
+version = "0.1.0"
+source = "git+https://github.com/ember-research-lab/ember-crypto?tag=v0.1.0#51509c7c5e6d287e286b844edea3c66359126554"
+dependencies = [
+ "ed25519-dalek",
+ "rand",
+ "sha2",
  "zeroize",
 ]
 

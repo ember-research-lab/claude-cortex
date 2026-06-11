@@ -10,10 +10,9 @@ repository.workspace = true
 description = "Cortex substrate: ledger, signing, hash chain, Merkle tree, content-addressed storage"
 
 [dependencies]
-ed25519-dalek.workspace = true
+ember-crypto.workspace = true
 sha2.workspace = true
 blake3.workspace = true
-rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
