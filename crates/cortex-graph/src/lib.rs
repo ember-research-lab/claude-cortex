@@ -12,6 +12,9 @@
 //! code-graph links) are fed in by later layers; this crate only owns the
 //! projection + the budgeted query.
 
+#[cfg(feature = "code-extract")]
+pub mod code;
+
 use cortex_similarity::Bm25Index;
 use ember_graph::{Confidence, Edge, Graph, InferredTier, Node, NodeId};
 

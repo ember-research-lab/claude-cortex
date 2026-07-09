@@ -9,8 +9,14 @@ authors.workspace = true
 repository.workspace = true
 description = "Projects cortex learnings into the ember-graph knowledge graph and answers questions with a token-budgeted, relationship-aware subgraph — the v-next retrieval substrate"
 
+[features]
+code-extract = ["dep:syn", "dep:walkdir"]
+
 [dependencies]
 cortex-similarity.workspace = true
 ember-graph.workspace = true
+syn = { workspace = true, optional = true }
+walkdir = { workspace = true, optional = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
