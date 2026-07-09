@@ -63,6 +63,8 @@ fn reinforcements_with_success(block_id: &str) -> Reinforcements {
             context: "confirmed".to_string(),
             delta: 0.1,
         }],
+        origin: cortex_core::models::Origin::default(),
+        corroboration: 0,
     };
     let mut r = Reinforcements::default();
     r.learnings

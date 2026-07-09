@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use anyhow::anyhow;
 use chrono::Utc;
-use cortex_core::confidence::decay_confidence;
+use cortex_core::confidence::effective_confidence_epistemic;
 use cortex_core::models::{
     Block, Learning, LearningCategory, OutcomeResult, Reinforcement, Reinforcements,
 };
@@ -90,8 +90,9 @@ fn round2(f: f64) -> f64 {
 }
 
 fn effective_confidence(reinforcement: &Reinforcement) -> f64 {
-    decay_confidence(
+    effective_confidence_epistemic(
         reinforcement.confidence,
+        reinforcement.origin,
         reinforcement.last_applied.into_inner(),
         Utc::now(),
     )
@@ -170,6 +171,51 @@ fn ledger_with_reinforcements(
 
 // ===== ledger-grounded tools =====
 
+pub async fn recall_context(
+    server: &CortexServer,
+    args: RecallContextArgs,
+) -> anyhow::Result<Value> {
+    let budget = args.budget_chars.unwrap_or(2000);
+    // Default depth 0 (BM25-seed render, NO traversal). Measured: cortex-graph's
+    // BM25-SIMILARITY edges are noise even at 1 hop — a query's top BM25 neighbors
+    // are often topically-tangential. So today recall_context == budget-bounded
+    // BM25. The graph seam stays: bump depth once REAL edges exist (code links
+    // from Phase 2b, corroboration links) — those, not similarity, justify
+    // traversal. Callers can override `depth`.
+    let depth = args.depth.unwrap_or(0);
+
+    let Some(path) = resolve_ledger(server, args.project_dir.as_deref())? else {
+        return Ok(json!({"context": "", "budget": budget, "error": null}));
+    };
+    let Some(_) = open_ledger(&path)? else {
+        return Ok(json!({"context": "", "budget": budget, "error": null}));
+    };
+    let reinforcements = {
+        let ledger = Ledger::open(&path)?;
+        ledger.read_reinforcements()?
+    };
+
+    let nodes: Vec<cortex_graph::LearningNode> = reinforcements
+        .learnings
+        .iter()
+        .map(|(id, r)| cortex_graph::LearningNode {
+            id: id.clone(),
+            content: r.content.clone(),
+            category: format!("{:?}", r.category),
+        })
+        .collect();
+
+    // edge_top_k = 0: build NO similarity edges. Measured that BM25-similarity
+    // edges are noise — `render` prints a node's outgoing edges, so any edge
+    // shows as a "similar_to" line regardless of traversal depth. With no edges,
+    // recall_context is an honest budget-bounded BM25 seed render. (This makes
+    // cortex-graph == cortex-similarity + render TODAY; the graph earns its keep
+    // only when REAL edges — code links, corroboration — are added.)
+    let g = cortex_graph::build_graph(&nodes, 0);
+    let text = cortex_graph::query(&g, &args.question, depth, budget);
+    Ok(json!({"context": text, "budget": budget, "error": null}))
+}
+
 pub async fn search_learnings(
     server: &CortexServer,
     args: SearchLearningsArgs,
@@ -219,6 +265,9 @@ pub async fn search_learnings(
                     continue;
                 }
             }
+            if cortex_core::confidence::is_contested(r.origin) {
+                continue; // Contested facts are quarantined from retrieval.
+            }
             let conf = confidence_with_spectral(r, id, active.as_ref());
             if conf < args.min_confidence {
                 continue;
@@ -226,23 +275,46 @@ pub async fn search_learnings(
             scored.push((id.clone(), r.clone(), conf, resonance, "spectral"));
         }
     } else {
-        let needle = args.query.to_lowercase();
+        // No active-memory snapshot: rank by BM25, NOT substring. Substring
+        // matching returns ZERO results for natural-language queries (measured:
+        // 3/3 NL queries returned nothing), making the ledger effectively
+        // unsearchable until a cortex-dream run exists. BM25 tokenizes, so
+        // term-overlap queries work regardless.
+        let mut bm25 = cortex_similarity::Bm25Index::new();
+        for r in reinforcements.learnings.values() {
+            bm25.add(r.content_hash.clone(), &r.content);
+        }
+        bm25.recompute_stats();
+        let query_scores: std::collections::HashMap<String, f64> =
+            bm25.score_query(&args.query).into_iter().collect();
+        let has_query = !args.query.trim().is_empty();
         for (id, r) in &reinforcements.learnings {
             if let Some(filter) = category_filter {
                 if r.category != filter {
                     continue;
                 }
             }
-            if !needle.is_empty() && !r.content.to_lowercase().contains(&needle) {
+            if cortex_core::confidence::is_contested(r.origin) {
+                continue; // Contested facts are quarantined from retrieval.
+            }
+            let relevance = query_scores.get(&r.content_hash).copied().unwrap_or(0.0);
+            // A non-empty query must lexically match (BM25 > 0); an empty query
+            // lists everything (ordered by confidence).
+            if has_query && relevance <= 0.0 {
                 continue;
             }
             let conf = effective_confidence(r);
             if conf < args.min_confidence {
                 continue;
             }
-            scored.push((id.clone(), r.clone(), conf, 0.0, "substring"));
+            scored.push((id.clone(), r.clone(), conf, relevance, "bm25"));
         }
-        scored.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+        // Rank by BM25 relevance, tie-break by effective confidence.
+        scored.sort_by(|a, b| {
+            b.3.partial_cmp(&a.3)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal))
+        });
     }
     scored.truncate(args.limit);
     let mode = scored
@@ -378,6 +450,31 @@ pub async fn record_outcome(
     }))
 }
 
+pub async fn record_corroboration(
+    server: &CortexServer,
+    args: RecordCorroborationArgs,
+) -> anyhow::Result<Value> {
+    let Some((ledger, reinforcements)) =
+        ledger_with_reinforcements(server, args.project_dir.as_deref())?
+    else {
+        return Ok(json!({"error": "Ledger not found"}));
+    };
+    let Some((id, _)) = match_prefix(&reinforcements, &args.learning_id) else {
+        return Ok(json!({
+            "error": format!("Learning '{}' not found", args.learning_id)
+        }));
+    };
+    let id = id.clone();
+    let context = args.context.unwrap_or_default();
+    let (corroboration, confidence) = ledger.record_corroboration(&id, context)?;
+    Ok(json!({
+        "learning_id": args.learning_id,
+        "corroboration": corroboration,
+        "confidence": confidence,
+        "error": null,
+    }))
+}
+
 pub async fn list_learnings(
     server: &CortexServer,
     args: ListLearningsArgs,
@@ -402,6 +499,9 @@ pub async fn list_learnings(
                 if r.category != filter {
                     return None;
                 }
+            }
+            if cortex_core::confidence::is_contested(r.origin) {
+                return None; // Contested facts are quarantined from retrieval.
             }
             let effective = confidence_with_spectral(&r, &id, active.as_ref());
             if effective < args.min_confidence {

@@ -47,7 +47,13 @@ fn create_append_record_verify_roundtrip() {
     let confidence_after = ledger
         .record_outcome(&block_a.learnings[0].id, OutcomeResult::Success, "shipped")
         .unwrap();
-    assert!((confidence_after - 0.7).abs() < 1e-9);
+    // v-next multiplicative model: this learning cites a source ("v3-spec"), so
+    // its origin is Extracted (a+ = 0.02). Success on 0.6 -> 0.6 + 0.02*(1 - 0.6)
+    // = 0.608 (was 0.7 under the old additive model).
+    assert!(
+        (confidence_after - 0.608).abs() < 1e-9,
+        "got {confidence_after}"
+    );
 
     let report = ledger.verify_chain().unwrap();
     assert!(report.is_clean(), "expected clean chain, got: {report:?}");

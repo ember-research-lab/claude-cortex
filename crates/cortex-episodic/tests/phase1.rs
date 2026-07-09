@@ -239,6 +239,8 @@ fn make_reinforcements_with_success(block_id: &str) -> Reinforcements {
             context: "confirmed".to_string(),
             delta: 0.1,
         }],
+        origin: cortex_core::models::Origin::default(),
+        corroboration: 0,
     };
     let mut r = Reinforcements::default();
     r.learnings
@@ -473,6 +475,8 @@ fn reconcile_multiple_blocks_partial_confirmation() {
             context: "confirmed".to_string(),
             delta: 0.1,
         }],
+        origin: cortex_core::models::Origin::default(),
+        corroboration: 0,
     };
     let mut both_reinforcements = reinforcements;
     both_reinforcements
@@ -518,6 +522,8 @@ fn reconcile_partial_or_failure_outcome_does_not_confirm() {
             context: "partial only".to_string(),
             delta: 0.0,
         }],
+        origin: cortex_core::models::Origin::default(),
+        corroboration: 0,
     };
     let mut reinforcements_partial = Reinforcements::default();
     reinforcements_partial
@@ -558,6 +564,8 @@ fn reconcile_partial_or_failure_outcome_does_not_confirm() {
             context: "failure only".to_string(),
             delta: -0.1,
         }],
+        origin: cortex_core::models::Origin::default(),
+        corroboration: 0,
     };
     let mut reinforcements_failure = Reinforcements::default();
     reinforcements_failure
