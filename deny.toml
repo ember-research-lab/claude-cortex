@@ -7,6 +7,12 @@ ignore = [
     # functional; build-time only, no runtime exposure. Revisit if nalgebra
     # swaps it out upstream.
     { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained; build-time proc macro via nalgebra/simba" },
+    # rmcp DNS-rebinding (CVE-2026-42559) affects ONLY the Streamable HTTP server
+    # transport. cortex-mcp uses stdio exclusively (feature `transport-io`); the
+    # advisory explicitly states "non-HTTP transports such as stdio ... are not
+    # affected." Patched in rmcp 1.4.0 — a major upgrade from 0.16 (full server
+    # rewrite) tracked separately; not applicable to our attack surface.
+    { id = "RUSTSEC-2026-0189", reason = "rmcp DNS-rebinding is HTTP-transport only; cortex-mcp is stdio-only (unaffected per advisory). Fix is rmcp 1.4.0, a major migration tracked separately." },
 ]
 
 [bans]

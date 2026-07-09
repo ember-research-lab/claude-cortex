@@ -1,6 +1,6 @@
 {
   "name": "claude-cortex",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Persistent memory that makes Claude Code smarter across sessions",
   "author": {
     "name": "Ember Research Lab",
@@ -13,7 +13,9 @@
   "keywords": ["ledger", "memory", "learning", "reinforcement", "blockchain"],
   "agents": [
     "./agents/bug-investigator.md",
+    "./agents/chat-consolidator.md",
     "./agents/code-implementer.md",
+    "./agents/consolidator.md",
     "./agents/falsifier-spec.md",
     "./agents/knowledge-retriever.md",
     "./agents/outcome-recorder.md",
