@@ -176,7 +176,13 @@ pub async fn recall_context(
     args: RecallContextArgs,
 ) -> anyhow::Result<Value> {
     let budget = args.budget_chars.unwrap_or(2000);
-    let depth = args.depth.unwrap_or(2);
+    // Default depth 0 (BM25-seed render, NO traversal). Measured: cortex-graph's
+    // BM25-SIMILARITY edges are noise even at 1 hop — a query's top BM25 neighbors
+    // are often topically-tangential. So today recall_context == budget-bounded
+    // BM25. The graph seam stays: bump depth once REAL edges exist (code links
+    // from Phase 2b, corroboration links) — those, not similarity, justify
+    // traversal. Callers can override `depth`.
+    let depth = args.depth.unwrap_or(0);
 
     let Some(path) = resolve_ledger(server, args.project_dir.as_deref())? else {
         return Ok(json!({"context": "", "budget": budget, "error": null}));
@@ -263,26 +269,46 @@ pub async fn search_learnings(
             scored.push((id.clone(), r.clone(), conf, resonance, "spectral"));
         }
     } else {
-        let needle = args.query.to_lowercase();
+        // No active-memory snapshot: rank by BM25, NOT substring. Substring
+        // matching returns ZERO results for natural-language queries (measured:
+        // 3/3 NL queries returned nothing), making the ledger effectively
+        // unsearchable until a cortex-dream run exists. BM25 tokenizes, so
+        // term-overlap queries work regardless.
+        let mut bm25 = cortex_similarity::Bm25Index::new();
+        for r in reinforcements.learnings.values() {
+            bm25.add(r.content_hash.clone(), &r.content);
+        }
+        bm25.recompute_stats();
+        let query_scores: std::collections::HashMap<String, f64> =
+            bm25.score_query(&args.query).into_iter().collect();
+        let has_query = !args.query.trim().is_empty();
         for (id, r) in &reinforcements.learnings {
             if let Some(filter) = category_filter {
                 if r.category != filter {
                     continue;
                 }
             }
-            if !needle.is_empty() && !r.content.to_lowercase().contains(&needle) {
-                continue;
-            }
             if cortex_core::confidence::is_contested(r.origin) {
                 continue; // Contested facts are quarantined from retrieval.
+            }
+            let relevance = query_scores.get(&r.content_hash).copied().unwrap_or(0.0);
+            // A non-empty query must lexically match (BM25 > 0); an empty query
+            // lists everything (ordered by confidence).
+            if has_query && relevance <= 0.0 {
+                continue;
             }
             let conf = effective_confidence(r);
             if conf < args.min_confidence {
                 continue;
             }
-            scored.push((id.clone(), r.clone(), conf, 0.0, "substring"));
+            scored.push((id.clone(), r.clone(), conf, relevance, "bm25"));
         }
-        scored.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+        // Rank by BM25 relevance, tie-break by effective confidence.
+        scored.sort_by(|a, b| {
+            b.3.partial_cmp(&a.3)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal))
+        });
     }
     scored.truncate(args.limit);
     let mode = scored
