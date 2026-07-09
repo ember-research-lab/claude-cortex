@@ -14,8 +14,8 @@ use crate::error::{Error, Result};
 use crate::hashing::compute_block_hash;
 use crate::merkle::MerkleTree;
 use crate::models::{
-    Block, BlockIndexEntry, Index, Learning, OutcomeResult, Reinforcement, ReinforcementOutcome,
-    Reinforcements,
+    Block, BlockIndexEntry, Index, Learning, Origin, OutcomeResult, Reinforcement,
+    ReinforcementOutcome, Reinforcements,
 };
 use crate::objects::{write_atomic_json, ObjectStore};
 use crate::signing::KeyManager;
@@ -184,6 +184,10 @@ impl Ledger {
                     content_hash: learning.content_hash.clone(),
                     object_store_hash: object_hash,
                     outcomes: Vec::new(),
+                    // v-next epistemic fields: origin defaults to Inferred(Near);
+                    // origin-at-tag-time assignment lands with the confidence math.
+                    origin: Origin::default(),
+                    corroboration: 0,
                 },
             );
         }

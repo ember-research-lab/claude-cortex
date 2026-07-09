@@ -407,6 +407,10 @@ fn transcribe_reinforcements(from: &Path) -> Result<Option<Reinforcements>> {
                 content_hash,
                 object_store_hash,
                 outcomes,
+                // v2 has no epistemic fields → default (Inferred(Near), 0). Does
+                // not touch block hashes (side-file only).
+                origin: cortex_core::models::Origin::default(),
+                corroboration: 0,
             },
         );
     }
