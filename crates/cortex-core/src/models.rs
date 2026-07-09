@@ -227,6 +227,39 @@ pub struct Reinforcements {
     pub learnings: std::collections::BTreeMap<String, Reinforcement>,
 }
 
+/// Inferential distance of an [`Origin::Inferred`] fact — sets its prior/half-life.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InferredTier {
+    Near,
+    Far,
+}
+
+/// Epistemic origin of a reinforcement (v-next confidence model). Lives ONLY on
+/// the mutable [`Reinforcement`] side-file — it is never hashed into a block
+/// (see `hashing::canonical_learning_value`), so adding it preserves every
+/// existing chain. Defaults to `Inferred(Near)` so pre-upgrade reinforcements
+/// (which have no `origin` key) deserialize unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum Origin {
+    /// Directly observed/stated. High prior, long half-life.
+    Extracted,
+    /// Derived by reasoning; tier = inferential distance.
+    Inferred(InferredTier),
+    /// Conflicting/uncertain. Low prior, short half-life.
+    Ambiguous,
+    /// An inference empirically confirmed by usage — observation-grade, earned.
+    Validated,
+    /// Contradicted by usage. Quarantined from default retrieval, kept for audit.
+    Contested,
+}
+
+impl Default for Origin {
+    fn default() -> Self {
+        Origin::Inferred(InferredTier::Near)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Reinforcement {
     pub category: LearningCategory,
@@ -240,6 +273,13 @@ pub struct Reinforcement {
     pub object_store_hash: String,
     #[serde(default)]
     pub outcomes: Vec<ReinforcementOutcome>,
+    /// Epistemic origin (v-next). `#[serde(default)]` → pre-upgrade records
+    /// deserialize as `Inferred(Near)`.
+    #[serde(default)]
+    pub origin: Origin,
+    /// Count of independent re-observations (v-next). Pre-upgrade records → 0.
+    #[serde(default)]
+    pub corroboration: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -248,4 +288,52 @@ pub struct ReinforcementOutcome {
     pub result: OutcomeResult,
     pub context: String,
     pub delta: f64,
+}
+
+#[cfg(test)]
+mod backcompat_tests {
+    use super::*;
+    use crate::time::UtcTime;
+
+    /// SUBSTRATE BACK-COMPAT: a pre-upgrade reinforcements.json record has no
+    /// `origin` / `corroboration` keys. It MUST still deserialize, defaulting the
+    /// epistemic fields and preserving every existing field. (Simulated by
+    /// serializing a record then stripping the new keys — format-agnostic.)
+    #[test]
+    fn reinforcement_deserializes_without_epistemic_fields() {
+        let now = UtcTime::now();
+        let r = Reinforcement {
+            category: LearningCategory::Pattern,
+            content: "x".into(),
+            confidence: 0.7,
+            outcome_count: 3,
+            last_updated: now,
+            last_applied: now,
+            block_id: "b".into(),
+            content_hash: "h".into(),
+            object_store_hash: "o".into(),
+            outcomes: Vec::new(),
+            origin: Origin::Validated, // deliberately non-default
+            corroboration: 5,
+        };
+        let mut v = serde_json::to_value(&r).unwrap();
+        let obj = v.as_object_mut().unwrap();
+        obj.remove("origin");
+        obj.remove("corroboration");
+
+        let back: Reinforcement = serde_json::from_value(v).unwrap();
+        assert_eq!(
+            back.origin,
+            Origin::default(),
+            "must default to Inferred(Near)"
+        );
+        assert_eq!(back.corroboration, 0);
+        assert_eq!(back.confidence, 0.7, "existing field must be preserved");
+        assert_eq!(back.outcome_count, 3);
+    }
+
+    #[test]
+    fn origin_default_is_inferred_near() {
+        assert_eq!(Origin::default(), Origin::Inferred(InferredTier::Near));
+    }
 }
