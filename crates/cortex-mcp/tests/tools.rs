@@ -357,3 +357,59 @@ async fn tag_learning_truncates_overlong_content() {
     let stored: &str = detail["content"].as_str().unwrap();
     assert_eq!(stored.chars().count(), 500);
 }
+
+#[tokio::test]
+async fn recall_context_returns_budget_bounded_context() {
+    let dir = TempDir::new().unwrap();
+    let server = make_server(dir.path());
+
+    impls::tag_learning(
+        &server,
+        TagLearningArgs {
+            content: "atomic writes use temp plus rename inside a flock".into(),
+            category: "pattern".into(),
+            confidence: 0.8,
+            source_file: None,
+            project_dir: None,
+        },
+    )
+    .await
+    .unwrap();
+    impls::tag_learning(
+        &server,
+        TagLearningArgs {
+            content: "confidence decay relaxes toward the prior on disuse".into(),
+            category: "pattern".into(),
+            confidence: 0.7,
+            source_file: None,
+            project_dir: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let recalled = impls::recall_context(
+        &server,
+        RecallContextArgs {
+            question: "atomic writes flock".into(),
+            budget_chars: Some(500),
+            depth: Some(2),
+            project_dir: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!(recalled["error"].is_null());
+    assert_eq!(recalled["budget"], 500);
+    let context = recalled["context"].as_str().unwrap();
+    assert!(
+        !context.is_empty(),
+        "expected non-empty context under budget, got: {context:?}"
+    );
+    assert!(
+        context.chars().count() <= 500,
+        "context exceeded budget: {} chars",
+        context.chars().count()
+    );
+}

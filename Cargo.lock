@@ -390,6 +390,7 @@ dependencies = [
  "clap",
  "cortex-active-memory",
  "cortex-core",
+ "cortex-graph",
  "cortex-handoff",
  "cortex-similarity",
  "cortex-spectral",

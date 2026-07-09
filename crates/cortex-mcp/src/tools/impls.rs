@@ -170,6 +170,39 @@ fn ledger_with_reinforcements(
 
 // ===== ledger-grounded tools =====
 
+pub async fn recall_context(
+    server: &CortexServer,
+    args: RecallContextArgs,
+) -> anyhow::Result<Value> {
+    let budget = args.budget_chars.unwrap_or(2000);
+    let depth = args.depth.unwrap_or(2);
+
+    let Some(path) = resolve_ledger(server, args.project_dir.as_deref())? else {
+        return Ok(json!({"context": "", "budget": budget, "error": null}));
+    };
+    let Some(_) = open_ledger(&path)? else {
+        return Ok(json!({"context": "", "budget": budget, "error": null}));
+    };
+    let reinforcements = {
+        let ledger = Ledger::open(&path)?;
+        ledger.read_reinforcements()?
+    };
+
+    let nodes: Vec<cortex_graph::LearningNode> = reinforcements
+        .learnings
+        .iter()
+        .map(|(id, r)| cortex_graph::LearningNode {
+            id: id.clone(),
+            content: r.content.clone(),
+            category: format!("{:?}", r.category),
+        })
+        .collect();
+
+    let g = cortex_graph::build_graph(&nodes, 5);
+    let text = cortex_graph::query(&g, &args.question, depth, budget);
+    Ok(json!({"context": text, "budget": budget, "error": null}))
+}
+
 pub async fn search_learnings(
     server: &CortexServer,
     args: SearchLearningsArgs,
