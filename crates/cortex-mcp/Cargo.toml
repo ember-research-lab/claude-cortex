@@ -18,6 +18,7 @@ cortex-core.workspace = true
 cortex-similarity.workspace = true
 cortex-active-memory.workspace = true
 cortex-handoff.workspace = true
+cortex-graph.workspace = true
 rmcp.workspace = true
 tokio.workspace = true
 serde.workspace = true

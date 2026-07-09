@@ -141,7 +141,7 @@ async fn spectral_confidence_overrides_scalar_when_snapshot_present() {
 }
 
 #[tokio::test]
-async fn search_falls_back_to_substring_without_snapshot() {
+async fn search_uses_bm25_without_snapshot() {
     let project = TempDir::new().unwrap();
     let server = make_server(project.path());
     let _ids = seed(&server).await;
@@ -158,9 +158,11 @@ async fn search_falls_back_to_substring_without_snapshot() {
     )
     .await
     .unwrap();
-    assert_eq!(result["mode"], "substring");
+    // No active-memory snapshot -> BM25 (NOT substring — substring returned zero
+    // for natural-language queries; measured 3/3 NL queries empty).
+    assert_eq!(result["mode"], "bm25");
     let results = result["results"].as_array().unwrap();
-    // 3 of the 5 entries mention PyRosetta.
+    // 3 of the 5 entries mention PyRosetta; BM25 scores them > 0, others 0.
     assert_eq!(results.len(), 3);
 }
 

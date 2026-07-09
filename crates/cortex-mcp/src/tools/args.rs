@@ -22,6 +22,21 @@ pub struct SearchLearningsArgs {
     pub project_dir: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct RecallContextArgs {
+    /// Question to project against the learning graph.
+    pub question: String,
+    /// Character budget for the returned context subgraph (default 2000).
+    #[serde(default)]
+    pub budget_chars: Option<usize>,
+    /// Graph traversal depth from seed nodes (default 2).
+    #[serde(default)]
+    pub depth: Option<usize>,
+    /// Project directory for project-specific recall, or null for global.
+    #[serde(default)]
+    pub project_dir: Option<String>,
+}
+
 fn default_min_confidence_search() -> f64 {
     0.5
 }
@@ -54,6 +69,18 @@ pub struct RecordOutcomeArgs {
     /// Optional context about the outcome.
     #[serde(default)]
     pub comment: Option<String>,
+    /// Project directory, or null for global ledger.
+    #[serde(default)]
+    pub project_dir: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct RecordCorroborationArgs {
+    /// Learning ID to update.
+    pub learning_id: String,
+    /// Optional context about the re-observation.
+    #[serde(default)]
+    pub context: Option<String>,
     /// Project directory, or null for global ledger.
     #[serde(default)]
     pub project_dir: Option<String>,

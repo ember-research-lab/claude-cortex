@@ -54,6 +54,13 @@ struct ToolEvent {
 enum NudgeKind {
     Web,
     ExternalMcp,
+    /// A subagent (`Task`/`Agent`) returned a synthesis — the richest durable
+    /// content in a session. Nudge `tag_learning`.
+    Agent,
+    /// A cortex *retrieval* tool ran (`search_learnings`/`get_learning`/
+    /// `list_learnings`) — a learning is in play. Nudge `record_outcome` /
+    /// corroboration so confidence tracks reality instead of decaying.
+    CortexRecall,
 }
 
 fn main() {
@@ -97,10 +104,26 @@ fn build_directive(
 /// moved to the orientation skill (loaded once per session) so it
 /// doesn't pay rent on every PostToolUse.
 fn compressed_directive(tool: &str, kind: NudgeKind) -> String {
-    let domain = match kind {
-        NudgeKind::Web => "external docs / API contracts",
-        NudgeKind::ExternalMcp => "service quirks / API patterns",
-    };
+    match kind {
+        NudgeKind::Web => tagging_directive(tool, "external docs / API contracts"),
+        NudgeKind::ExternalMcp => tagging_directive(tool, "service quirks / API patterns"),
+        NudgeKind::Agent => {
+            tagging_directive(tool, "subagent synthesis — durable patterns / decisions")
+        }
+        NudgeKind::CortexRecall => format!(
+            "# Outcome-Capture Nudge\n\
+             `{tool}` recalled ledger learning(s). When you act on one, call \
+             `record_outcome` (success/partial/failure) so confidence tracks \
+             reality — recorded outcomes are how the ledger stops being stale \
+             priors. Re-confirming a known fact counts as corroboration. Skip \
+             only if nothing was applied."
+        ),
+    }
+}
+
+/// Shared `tag_learning` nudge body; `domain` names the kind of durable signal
+/// worth capturing from this tool.
+fn tagging_directive(tool: &str, domain: &str) -> String {
     format!(
         "# Discovery-Tagging Nudge\n\
          `{tool}` ran. If its result revealed a durable pattern \
@@ -129,7 +152,14 @@ fn response_is_uninformative(response: &Value) -> bool {
             }
             // Common "results" / "matches" / "items" arrays — empty means
             // no signal worth nudging on.
-            for key in ["results", "matches", "items", "entries", "hits"] {
+            for key in [
+                "results",
+                "matches",
+                "items",
+                "entries",
+                "hits",
+                "learnings",
+            ] {
                 if let Some(Value::Array(arr)) = map.get(key) {
                     if arr.is_empty() {
                         return true;
@@ -157,15 +187,35 @@ fn looks_like_zero_hit(s: &str) -> bool {
         || lc.contains("no matches found")
 }
 
-/// High-signal classification (v0.3.4 allowlist).
+/// High-signal classification (v0.3.4 allowlist; v-next auto-capture branches).
 fn classify(tool: &str) -> Option<NudgeKind> {
     if matches!(tool, "WebFetch" | "WebSearch") {
         return Some(NudgeKind::Web);
+    }
+    // Subagent syntheses are the highest-value durable content in a session —
+    // and were previously silent. (`TaskCreate`/`TaskUpdate` are the task-list
+    // tools, matched by exact name, and stay routine/silent.)
+    if matches!(tool, "Task" | "Agent") {
+        return Some(NudgeKind::Agent);
+    }
+    // Cortex *retrieval* signals a learning is in play — nudge outcome capture.
+    if is_cortex_recall(tool) {
+        return Some(NudgeKind::CortexRecall);
     }
     if tool.starts_with("mcp__") && !tool.contains("claude-cortex") && !tool.contains("cortex") {
         return Some(NudgeKind::ExternalMcp);
     }
     None
+}
+
+/// True only for cortex learning-*retrieval* tools — not `tag_learning` /
+/// `record_outcome`, which stay silent so a capture call can't recurse into a
+/// nudge to capture again.
+fn is_cortex_recall(tool: &str) -> bool {
+    tool.contains("cortex")
+        && (tool.ends_with("search_learnings")
+            || tool.ends_with("get_learning")
+            || tool.ends_with("list_learnings"))
 }
 
 // ===== dedup sidecar =====
@@ -314,6 +364,47 @@ mod tests {
     }
 
     #[test]
+    fn subagent_tools_classify_as_agent() {
+        assert_eq!(classify("Task"), Some(NudgeKind::Agent));
+        assert_eq!(classify("Agent"), Some(NudgeKind::Agent));
+    }
+
+    #[test]
+    fn cortex_recall_classifies_as_recall() {
+        for t in [
+            "mcp__plugin_claude-cortex_cortex__search_learnings",
+            "mcp__plugin_claude-cortex_cortex__get_learning",
+            "mcp__plugin_claude-cortex_cortex__list_learnings",
+        ] {
+            assert_eq!(classify(t), Some(NudgeKind::CortexRecall), "recall for {t}");
+        }
+    }
+
+    #[test]
+    fn cortex_capture_tools_stay_silent() {
+        // tag_learning / record_outcome must NOT fire — else a capture call
+        // recurses into a nudge to capture again.
+        assert!(classify("mcp__plugin_claude-cortex_cortex__record_outcome").is_none());
+        assert!(classify("mcp__plugin_claude-cortex_cortex__tag_learning").is_none());
+    }
+
+    #[test]
+    fn recall_directive_prompts_record_outcome() {
+        let out = compressed_directive(
+            "mcp__plugin_claude-cortex_cortex__get_learning",
+            NudgeKind::CortexRecall,
+        );
+        assert!(out.contains("record_outcome"));
+        assert!(out.contains("corroboration"));
+    }
+
+    #[test]
+    fn agent_directive_prompts_tag_learning() {
+        let out = compressed_directive("Agent", NudgeKind::Agent);
+        assert!(out.contains("tag_learning"));
+    }
+
+    #[test]
     fn empty_array_response_suppresses() {
         assert!(response_is_uninformative(&json!([])));
     }
@@ -323,6 +414,12 @@ mod tests {
         assert!(response_is_uninformative(&json!({"results": []})));
         assert!(response_is_uninformative(&json!({"matches": []})));
         assert!(response_is_uninformative(&json!({"total": 0})));
+    }
+
+    #[test]
+    fn empty_learnings_field_suppresses() {
+        // Zero-hit cortex recall must not fire the outcome nudge.
+        assert!(response_is_uninformative(&json!({"learnings": []})));
     }
 
     #[test]

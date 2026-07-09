@@ -1,7 +1,7 @@
 ---
 name: consolidator
 description: Consolidates pending episodes into the long-term ledger by applying the amnesiac-legibility rubric. Promotes only learnings that would be usable by a capable collaborator with zero memory of the session. Triggers on "consolidate episodes", "run consolidation", "process episodes", "session-start consolidation".
-tools: Bash, mcp__cortex__tag_learning, mcp__cortex__search_learnings, mcp__cortex__get_learning
+tools: Bash, mcp__cortex__tag_learning, mcp__cortex__search_learnings, mcp__cortex__get_learning, mcp__cortex__record_corroboration
 ---
 
 # Consolidator Agent
@@ -107,8 +107,13 @@ If no episodes were pending, output `(no pending episodes to consolidate)` and e
   measured rate is the correct output; a falsified high rate is a violation of
   this agent's contract.
 - Use `search_learnings` before promoting to check whether an equivalent
-  learning already exists at high confidence. If a near-duplicate exists, skip
-  the promotion and note it in SKIPPED.
+  learning already exists. If a near-duplicate exists, DO NOT tag a duplicate —
+  instead call `record_corroboration` on the existing learning's id (a
+  re-observation of a known pattern is exactly what corroboration captures: it
+  strengthens the fact and, with enough corroborations, promotes an Inferred
+  fact to Validated). Note it in SKIPPED as "corroborated <id>" rather than a
+  bare skip. This is the primary path that makes usage-promotion fire in
+  practice — a duplicate is signal, not waste.
 
 ## When to refuse
 

@@ -4,12 +4,29 @@ All notable changes to claude-cortex are documented here. Format follows [Keep a
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-07-09
+
+The **v-next substrate** release: usage-driven epistemic confidence, relationship-aware retrieval, and the first pieces of the cross-surface **consolidation fabric**. The on-disk v3 ledger format is preserved (new `Reinforcement` fields are `serde(default)`; existing ledgers read without migration).
+
 ### Added
-- **`version-guard` CI job** (`release.yml`) — fails any `v*` release tag whose value doesn't match `.claude-plugin/plugin.json` `version`. Prevents the silent-stale-update footgun: Claude Code keys `/plugin update` on `plugin.json` version, so a tag/manifest mismatch (e.g. tagging `v0.4.0` while the manifest still says `0.4.0-rc1`) leaves every installed copy stuck. The guard runs before `build`, so a mismatched release never publishes artifacts.
+- **Epistemic confidence model** (`cortex-core`). Learnings carry an `Origin` (Extracted / Inferred{Near,Far} / Ambiguous / Validated / Contested); confidence updates multiplicatively (Success `c += α⁺(1−c)`, Failure `c −= α⁻c`) and decays by *relaxing to the origin prior* (`p0 + (c−p0)·2^(−dt/half_life)`) rather than to zero. Repeated corroboration promotes Inferred → Validated; a Failure can flip Validated → Contested, and **Contested learnings are excluded from retrieval** at every surface.
+- **`record_corroboration` MCP tool** — a re-observation of an existing learning (across sessions or surfaces) strengthens it and drives usage-promotion, instead of tagging a duplicate.
+- **`recall_context` MCP tool** — token-budgeted, relationship-aware retrieval over the learning graph.
+- **`cortex-graph` crate** — projects learnings into the [ember-graph](https://github.com/ember-research-lab/ember-graph) knowledge graph (v0.2.0); includes feature-gated Rust code-graph extraction for project/code understanding.
+- **`chat-consolidator` agent** — the automatic cross-surface consolidation pass: mines the claude.ai chat corpus for durable thread content absent from the ledger, threads it into the global brain, and flags cross-surface **contradictions**. Registered in `plugin.json`.
+- **`consolidator` agent now registered in `plugin.json`** — it was dispatched by the `session_start` hook but never listed in the manifest's `agents` array.
+- **Auto-capture hook nudges** — `record_outcome` prompted on `recall_context`, `tag_learning` prompted on subagent spawn, so usage and discovery persist without manual bookkeeping.
+- **Design docs** — `docs/consolidation-fabric.md` (the cross-surface/cross-repo memory goal) and `docs/vnext-substrate-spec.md` (the unified memory + project substrate).
+- **`version-guard` CI job** (`release.yml`) — fails any `v*` release tag whose value doesn't match `.claude-plugin/plugin.json` `version`, preventing the silent-stale-update footgun (Claude Code keys `/plugin update` on the manifest version).
 
 ### Changed
+- **`search_learnings` now ranks with BM25 without requiring a prior `dream` run** — previously it fell back to substring matching until an index existed, which failed natural-language queries. Fixes real NL-search misses found via an A/B retrieval measurement.
+- **`consolidator` agent corroborates near-duplicates** (`record_corroboration`) instead of skipping them — wiring the usage-promotion path that makes Inferred facts converge to Validated in practice.
 - **README Upgrading** is now an explicit two-step flow: `/plugin marketplace update` + `/plugin update` (plugin/markdown), then re-run `install.sh` (binaries), documenting that the catalog cache and plugin cache are separate and that updates are version-keyed. Adds an optional auto-update note (marketplace toggle; off by default for third-party marketplaces).
 - **README Install** drops the stale "Once v0.3.0 ships" preamble (the plugin is shipped and at 0.4.x).
+
+### Fixed
+- **Supply-chain gate (`cargo-deny advisories`).** Bumped `anyhow` 1.0.102 → **1.0.103** to clear **RUSTSEC-2026-0190** (unsoundness in `Error::downcast_mut`). Added a reasoned ignore for **RUSTSEC-2026-0189** (rmcp DNS-rebinding): it affects only the Streamable HTTP server transport, and cortex-mcp is **stdio-only** (`transport-io`) — per the advisory, non-HTTP transports are unaffected. The patched `rmcp` 1.4.0 is a major migration from 0.16, tracked separately.
 
 ## [0.4.1] — 2026-05-28
 

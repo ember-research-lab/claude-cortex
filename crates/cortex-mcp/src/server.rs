@@ -12,7 +12,8 @@ use crate::tools::{
     args::{
         EntitySearchArgs, EntityShowArgs, EntityStatsArgs, GetHandoffArgs, GetLearningArgs,
         GetSessionSummaryArgs, GetSuggestionsArgs, LedgerStatsArgs, ListLearningsArgs,
-        RecordOutcomeArgs, SearchLearningsArgs, TagHandoffArgs, TagLearningArgs,
+        RecallContextArgs, RecordCorroborationArgs, RecordOutcomeArgs, SearchLearningsArgs,
+        TagHandoffArgs, TagLearningArgs,
     },
     impls,
 };
@@ -64,6 +65,18 @@ impl CortexServer {
         impls::run(impls::search_learnings(self, args)).await
     }
 
+    /// Recall a budget-bounded, relationship-aware context subgraph of relevant learnings.
+    #[tool(
+        name = "recall_context",
+        description = "Recall a budget-bounded, relationship-aware context subgraph of relevant learnings for a question."
+    )]
+    pub async fn recall_context(
+        &self,
+        Parameters(args): Parameters<RecallContextArgs>,
+    ) -> Result<String, ErrorData> {
+        impls::run(impls::recall_context(self, args)).await
+    }
+
     /// Get full details of a specific learning by ID.
     #[tool(
         name = "get_learning",
@@ -86,6 +99,18 @@ impl CortexServer {
         Parameters(args): Parameters<RecordOutcomeArgs>,
     ) -> Result<String, ErrorData> {
         impls::run(impls::record_outcome(self, args)).await
+    }
+
+    /// Record an independent re-observation of a learning (corroboration, not an outcome).
+    #[tool(
+        name = "record_corroboration",
+        description = "Record an independent re-observation of a learning: increment corroboration, nudge confidence, reclassify origin. Not an outcome."
+    )]
+    pub async fn record_corroboration(
+        &self,
+        Parameters(args): Parameters<RecordCorroborationArgs>,
+    ) -> Result<String, ErrorData> {
+        impls::run(impls::record_corroboration(self, args)).await
     }
 
     /// List learnings from the ledger sorted by confidence.
