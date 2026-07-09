@@ -12,7 +12,8 @@ use crate::tools::{
     args::{
         EntitySearchArgs, EntityShowArgs, EntityStatsArgs, GetHandoffArgs, GetLearningArgs,
         GetSessionSummaryArgs, GetSuggestionsArgs, LedgerStatsArgs, ListLearningsArgs,
-        RecallContextArgs, RecordOutcomeArgs, SearchLearningsArgs, TagHandoffArgs, TagLearningArgs,
+        RecallContextArgs, RecordCorroborationArgs, RecordOutcomeArgs, SearchLearningsArgs,
+        TagHandoffArgs, TagLearningArgs,
     },
     impls,
 };
@@ -98,6 +99,18 @@ impl CortexServer {
         Parameters(args): Parameters<RecordOutcomeArgs>,
     ) -> Result<String, ErrorData> {
         impls::run(impls::record_outcome(self, args)).await
+    }
+
+    /// Record an independent re-observation of a learning (corroboration, not an outcome).
+    #[tool(
+        name = "record_corroboration",
+        description = "Record an independent re-observation of a learning: increment corroboration, nudge confidence, reclassify origin. Not an outcome."
+    )]
+    pub async fn record_corroboration(
+        &self,
+        Parameters(args): Parameters<RecordCorroborationArgs>,
+    ) -> Result<String, ErrorData> {
+        impls::run(impls::record_corroboration(self, args)).await
     }
 
     /// List learnings from the ledger sorted by confidence.

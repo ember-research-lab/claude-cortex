@@ -249,6 +249,17 @@ pub fn is_contested(origin: Origin) -> bool {
     matches!(origin, Origin::Contested)
 }
 
+/// Origin for a freshly-tagged learning: `Extracted` when it cites a non-empty
+/// `source` (grounded/observed), else `Inferred(Near)` (the conservative default
+/// for reasoning-born insights). Initial rule for the falsifier-flagged ambiguity;
+/// refine when a richer provenance signal exists.
+pub fn origin_for_new(source: Option<&str>) -> Origin {
+    match source {
+        Some(s) if !s.trim().is_empty() => Origin::Extracted,
+        _ => Origin::Inferred(InferredTier::Near),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -430,5 +441,16 @@ mod tests {
             trust(0.8, Origin::Extracted) > trust(0.8, Origin::Inferred(InferredTier::Far)),
             "observation-grade outranks a far inference at equal confidence"
         );
+    }
+
+    #[test]
+    fn origin_for_new_uses_source() {
+        assert_eq!(origin_for_new(Some("v3-spec")), Origin::Extracted);
+        assert_eq!(
+            origin_for_new(Some("   ")),
+            Origin::Inferred(InferredTier::Near),
+            "blank source is not a citation"
+        );
+        assert_eq!(origin_for_new(None), Origin::Inferred(InferredTier::Near));
     }
 }

@@ -418,6 +418,31 @@ pub async fn record_outcome(
     }))
 }
 
+pub async fn record_corroboration(
+    server: &CortexServer,
+    args: RecordCorroborationArgs,
+) -> anyhow::Result<Value> {
+    let Some((ledger, reinforcements)) =
+        ledger_with_reinforcements(server, args.project_dir.as_deref())?
+    else {
+        return Ok(json!({"error": "Ledger not found"}));
+    };
+    let Some((id, _)) = match_prefix(&reinforcements, &args.learning_id) else {
+        return Ok(json!({
+            "error": format!("Learning '{}' not found", args.learning_id)
+        }));
+    };
+    let id = id.clone();
+    let context = args.context.unwrap_or_default();
+    let (corroboration, confidence) = ledger.record_corroboration(&id, context)?;
+    Ok(json!({
+        "learning_id": args.learning_id,
+        "corroboration": corroboration,
+        "confidence": confidence,
+        "error": null,
+    }))
+}
+
 pub async fn list_learnings(
     server: &CortexServer,
     args: ListLearningsArgs,
