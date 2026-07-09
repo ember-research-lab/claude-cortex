@@ -347,6 +347,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cortex-graph"
+version = "0.4.0"
+dependencies = [
+ "cortex-similarity",
+ "ember-graph",
+]
+
+[[package]]
 name = "cortex-handoff"
 version = "0.4.0"
 dependencies = [
@@ -600,6 +608,11 @@ dependencies = [
  "sha2",
  "zeroize",
 ]
+
+[[package]]
+name = "ember-graph"
+version = "0.2.0"
+source = "git+https://github.com/ember-research-lab/ember-graph?tag=v0.2.0#0b3c08e7d57b25b53476ccffdbfd682ed7205ffd"
 
 [[package]]
 name = "equivalent"

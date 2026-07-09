@@ -1,0 +1,16 @@
+[package]
+publish = false
+name = "cortex-graph"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Projects cortex learnings into the ember-graph knowledge graph and answers questions with a token-budgeted, relationship-aware subgraph — the v-next retrieval substrate"
+
+[dependencies]
+cortex-similarity.workspace = true
+ember-graph.workspace = true
+
+[dev-dependencies]
