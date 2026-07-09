@@ -90,6 +90,10 @@ cortex-graph = { path = "crates/cortex-graph" }
 # Filesystem helpers
 tempfile = "3"
 fs2 = "0.4"
+walkdir = "2"
+
+# Rust source parsing (cortex-graph code-extract feature)
+syn = { version = "2", features = ["full", "parsing"] }
 
 # Internal
 cortex-core = { path = "crates/cortex-core" }
