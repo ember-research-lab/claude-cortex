@@ -12,7 +12,7 @@ use crate::tools::{
     args::{
         EntitySearchArgs, EntityShowArgs, EntityStatsArgs, GetHandoffArgs, GetLearningArgs,
         GetSessionSummaryArgs, GetSuggestionsArgs, LedgerStatsArgs, ListLearningsArgs,
-        RecordOutcomeArgs, SearchLearningsArgs, TagHandoffArgs, TagLearningArgs,
+        RecallContextArgs, RecordOutcomeArgs, SearchLearningsArgs, TagHandoffArgs, TagLearningArgs,
     },
     impls,
 };
@@ -62,6 +62,18 @@ impl CortexServer {
         Parameters(args): Parameters<SearchLearningsArgs>,
     ) -> Result<String, ErrorData> {
         impls::run(impls::search_learnings(self, args)).await
+    }
+
+    /// Recall a budget-bounded, relationship-aware context subgraph of relevant learnings.
+    #[tool(
+        name = "recall_context",
+        description = "Recall a budget-bounded, relationship-aware context subgraph of relevant learnings for a question."
+    )]
+    pub async fn recall_context(
+        &self,
+        Parameters(args): Parameters<RecallContextArgs>,
+    ) -> Result<String, ErrorData> {
+        impls::run(impls::recall_context(self, args)).await
     }
 
     /// Get full details of a specific learning by ID.

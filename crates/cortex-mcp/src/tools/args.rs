@@ -22,6 +22,21 @@ pub struct SearchLearningsArgs {
     pub project_dir: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct RecallContextArgs {
+    /// Question to project against the learning graph.
+    pub question: String,
+    /// Character budget for the returned context subgraph (default 2000).
+    #[serde(default)]
+    pub budget_chars: Option<usize>,
+    /// Graph traversal depth from seed nodes (default 2).
+    #[serde(default)]
+    pub depth: Option<usize>,
+    /// Project directory for project-specific recall, or null for global.
+    #[serde(default)]
+    pub project_dir: Option<String>,
+}
+
 fn default_min_confidence_search() -> f64 {
     0.5
 }
