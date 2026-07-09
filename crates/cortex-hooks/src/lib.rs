@@ -7,7 +7,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use cortex_core::confidence::decay_confidence;
+use cortex_core::confidence::effective_confidence_epistemic;
 use cortex_core::models::Reinforcement;
 use cortex_core::Ledger;
 use serde::{Deserialize, Serialize};
@@ -107,6 +107,10 @@ fn extend_from_ledger(path: &Path, min_conf: f64, out: &mut Vec<ScoredLearning>)
         return;
     };
     for (id, r) in reinforcements.learnings {
+        // Contested facts are quarantined from default surfacing (kept on disk).
+        if cortex_core::confidence::is_contested(r.origin) {
+            continue;
+        }
         let effective = effective_confidence(&r);
         if effective < min_conf {
             continue;
@@ -122,7 +126,12 @@ fn extend_from_ledger(path: &Path, min_conf: f64, out: &mut Vec<ScoredLearning>)
 }
 
 fn effective_confidence(r: &Reinforcement) -> f64 {
-    decay_confidence(r.confidence, r.last_applied.into_inner(), Utc::now())
+    effective_confidence_epistemic(
+        r.confidence,
+        r.origin,
+        r.last_applied.into_inner(),
+        Utc::now(),
+    )
 }
 
 fn category_str(c: cortex_core::models::LearningCategory) -> &'static str {

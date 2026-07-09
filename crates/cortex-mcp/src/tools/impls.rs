@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use anyhow::anyhow;
 use chrono::Utc;
-use cortex_core::confidence::decay_confidence;
+use cortex_core::confidence::effective_confidence_epistemic;
 use cortex_core::models::{
     Block, Learning, LearningCategory, OutcomeResult, Reinforcement, Reinforcements,
 };
@@ -90,8 +90,9 @@ fn round2(f: f64) -> f64 {
 }
 
 fn effective_confidence(reinforcement: &Reinforcement) -> f64 {
-    decay_confidence(
+    effective_confidence_epistemic(
         reinforcement.confidence,
+        reinforcement.origin,
         reinforcement.last_applied.into_inner(),
         Utc::now(),
     )
@@ -252,6 +253,9 @@ pub async fn search_learnings(
                     continue;
                 }
             }
+            if cortex_core::confidence::is_contested(r.origin) {
+                continue; // Contested facts are quarantined from retrieval.
+            }
             let conf = confidence_with_spectral(r, id, active.as_ref());
             if conf < args.min_confidence {
                 continue;
@@ -268,6 +272,9 @@ pub async fn search_learnings(
             }
             if !needle.is_empty() && !r.content.to_lowercase().contains(&needle) {
                 continue;
+            }
+            if cortex_core::confidence::is_contested(r.origin) {
+                continue; // Contested facts are quarantined from retrieval.
             }
             let conf = effective_confidence(r);
             if conf < args.min_confidence {
@@ -435,6 +442,9 @@ pub async fn list_learnings(
                 if r.category != filter {
                     return None;
                 }
+            }
+            if cortex_core::confidence::is_contested(r.origin) {
+                return None; // Contested facts are quarantined from retrieval.
             }
             let effective = confidence_with_spectral(&r, &id, active.as_ref());
             if effective < args.min_confidence {

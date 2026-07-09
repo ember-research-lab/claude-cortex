@@ -47,7 +47,13 @@ fn create_append_record_verify_roundtrip() {
     let confidence_after = ledger
         .record_outcome(&block_a.learnings[0].id, OutcomeResult::Success, "shipped")
         .unwrap();
-    assert!((confidence_after - 0.7).abs() < 1e-9);
+    // v-next multiplicative model: origin defaults to Inferred(Near) (a+ = 0.10),
+    // so Success on 0.6 -> 0.6 + 0.10*(1 - 0.6) = 0.64 (was 0.7 under the old
+    // additive +0.10 model).
+    assert!(
+        (confidence_after - 0.64).abs() < 1e-9,
+        "got {confidence_after}"
+    );
 
     let report = ledger.verify_chain().unwrap();
     assert!(report.is_clean(), "expected clean chain, got: {report:?}");
