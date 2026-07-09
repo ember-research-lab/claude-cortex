@@ -4,6 +4,11 @@ All notable changes to claude-cortex are documented here. Format follows [Keep a
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-07-09
+
+### Fixed
+- **Cortex sub-agents silently received none of their cortex MCP tools.** Four agents — `consolidator`, `chat-consolidator`, `knowledge-retriever`, `outcome-recorder` — declared their memory tools in `tools:` frontmatter as `mcp__cortex__<tool>`. But a plugin-bundled MCP server's tools are only grantable by their full scoped name `mcp__plugin_claude-cortex_cortex__<tool>`; the bare `mcp__<server>__<tool>` short form **never fires** for plugin servers (it only resolves for top-level `.mcp.json` servers). So these sub-agents got zero cortex tools: the session-start `consolidator` could not write promoted learnings to the ledger, and `chat-consolidator` could not tag/corroborate at all — a failure masked when a cheap-lane run fabricated a success report with invented IDs. Corrected all four grants to the full plugin-namespaced form. **Verify after `/plugin update` + restart:** dispatch one of these agents and confirm it now has the cortex tools (its writes land as a real `ledger_stats` delta).
+
 ## [0.5.0] — 2026-07-09
 
 The **v-next substrate** release: usage-driven epistemic confidence, relationship-aware retrieval, and the first pieces of the cross-surface **consolidation fabric**. The on-disk v3 ledger format is preserved (new `Reinforcement` fields are `serde(default)`; existing ledgers read without migration).

@@ -1,7 +1,7 @@
 ---
 name: knowledge-retriever
 description: Deep retrieval of prior learnings from the cortex ledger with ranking and contextualization. Deploy when you need to find prior learnings, patterns, or decisions relevant to the current task and reason about which apply. Triggers on "what did we learn", "previous patterns", "prior knowledge", "did we encounter this before", "what does the ledger say about", "have we seen this before", "lookup history", "knowledge retrieval", "deep retrieval", "rank these learnings". **Orchestration hint**: For deep multi-learning analysis with ranking. For single-shot lookups, the orchestrator should call `search_learnings` / `get_learning` MCP tools directly.
-tools: Bash, Read, Grep, Glob, mcp__cortex__search_learnings, mcp__cortex__get_learning, mcp__cortex__list_learnings
+tools: Bash, Read, Grep, Glob, mcp__plugin_claude-cortex_cortex__search_learnings, mcp__plugin_claude-cortex_cortex__get_learning, mcp__plugin_claude-cortex_cortex__list_learnings
 model: haiku
 ---
 

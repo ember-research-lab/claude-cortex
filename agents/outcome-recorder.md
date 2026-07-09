@@ -1,7 +1,7 @@
 ---
 name: outcome-recorder
 description: Auto-classifies outcomes for learnings referenced or applied during a session. Calls record_outcome MCP tool with success / partial / failure verdicts and one-line context. Triggers on "record outcomes", "classify outcomes", "session ended", "auto-classify", "outcome recorder", "outcome-recorder", "session-end extraction".
-tools: Bash, mcp__cortex__search_learnings, mcp__cortex__get_learning, mcp__cortex__record_outcome
+tools: Bash, mcp__plugin_claude-cortex_cortex__search_learnings, mcp__plugin_claude-cortex_cortex__get_learning, mcp__plugin_claude-cortex_cortex__record_outcome
 ---
 
 # Outcome-Recorder Agent
