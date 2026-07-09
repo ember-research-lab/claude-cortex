@@ -1,7 +1,7 @@
 ---
 name: consolidator
 description: Consolidates pending episodes into the long-term ledger by applying the amnesiac-legibility rubric. Promotes only learnings that would be usable by a capable collaborator with zero memory of the session. Triggers on "consolidate episodes", "run consolidation", "process episodes", "session-start consolidation".
-tools: Bash, mcp__cortex__tag_learning, mcp__cortex__search_learnings, mcp__cortex__get_learning, mcp__cortex__record_corroboration
+tools: Bash, mcp__plugin_claude-cortex_cortex__tag_learning, mcp__plugin_claude-cortex_cortex__search_learnings, mcp__plugin_claude-cortex_cortex__get_learning, mcp__plugin_claude-cortex_cortex__record_corroboration
 ---
 
 # Consolidator Agent
