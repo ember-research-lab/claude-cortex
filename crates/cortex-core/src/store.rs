@@ -14,8 +14,8 @@ use crate::error::{Error, Result};
 use crate::hashing::compute_block_hash;
 use crate::merkle::MerkleTree;
 use crate::models::{
-    Block, BlockIndexEntry, Index, Learning, Origin, OutcomeResult, Reinforcement,
-    ReinforcementOutcome, Reinforcements,
+    Block, BlockIndexEntry, Index, Learning, OutcomeResult, Reinforcement, ReinforcementOutcome,
+    Reinforcements,
 };
 use crate::objects::{write_atomic_json, ObjectStore};
 use crate::signing::KeyManager;
@@ -184,9 +184,9 @@ impl Ledger {
                     content_hash: learning.content_hash.clone(),
                     object_store_hash: object_hash,
                     outcomes: Vec::new(),
-                    // v-next epistemic fields: origin defaults to Inferred(Near);
-                    // origin-at-tag-time assignment lands with the confidence math.
-                    origin: Origin::default(),
+                    // v-next epistemic fields: Extracted if the learning cites a
+                    // source, else Inferred(Near). Corroboration starts at 0.
+                    origin: crate::confidence::origin_for_new(learning.source.as_deref()),
                     corroboration: 0,
                 },
             );
@@ -242,6 +242,48 @@ impl Ledger {
         let confidence = reinforcement.confidence;
         write_atomic_json(&self.reinforcements_path(), &reinforcements)?;
         Ok(confidence)
+    }
+
+    /// Record an independent re-observation of a learning (not an outcome).
+    ///
+    /// Increments the corroboration counter, nudges confidence via
+    /// [`crate::confidence::apply_corroboration`], reclassifies origin (making
+    /// Inferred→Validated promotion reachable end-to-end), and persists.
+    /// Does **not** push a [`ReinforcementOutcome`].
+    pub fn record_corroboration(
+        &self,
+        learning_id: &str,
+        context: impl Into<String>,
+    ) -> Result<(u32, f64)> {
+        let _context = context.into();
+        let _guard = exclusive_lock(&self.reinforcements_path())?;
+        let mut reinforcements = self.read_reinforcements()?;
+        let reinforcement = reinforcements
+            .learnings
+            .get_mut(learning_id)
+            .ok_or_else(|| {
+                Error::Malformed(format!(
+                    "learning {learning_id} not found in reinforcements"
+                ))
+            })?;
+        let origin = reinforcement.origin;
+        reinforcement.corroboration = reinforcement.corroboration.saturating_add(1);
+        reinforcement.confidence = crate::confidence::apply_corroboration(reinforcement.confidence);
+        let now = UtcTime::now();
+        reinforcement.last_updated = now;
+        reinforcement.last_applied = now;
+        // Reclassify origin (dt = 0, so effective == stored). Pass None for
+        // last_result — corroboration is not an outcome signal.
+        reinforcement.origin = crate::confidence::reclassify(
+            origin,
+            reinforcement.confidence,
+            reinforcement.corroboration,
+            None,
+        );
+        let corroboration = reinforcement.corroboration;
+        let confidence = reinforcement.confidence;
+        write_atomic_json(&self.reinforcements_path(), &reinforcements)?;
+        Ok((corroboration, confidence))
     }
 
     pub fn verify_chain(&self) -> Result<ChainReport> {

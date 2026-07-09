@@ -413,3 +413,86 @@ async fn recall_context_returns_budget_bounded_context() {
         context.chars().count()
     );
 }
+
+/// e2e: a learning contested via the public path (tag-with-source -> Extracted,
+/// then a Failure -> Contested) is EXCLUDED from search but kept on disk for audit.
+#[tokio::test]
+async fn contested_learning_excluded_from_search_but_kept_on_disk() {
+    let dir = TempDir::new().unwrap();
+    let server = make_server(dir.path());
+
+    // A sourced learning -> Extracted origin.
+    let tag = impls::tag_learning(
+        &server,
+        TagLearningArgs {
+            content: "flock is advisory on Linux, mandatory on Windows".into(),
+            category: "error".into(),
+            confidence: 0.8,
+            source_file: Some("store.rs".into()),
+            project_dir: None,
+        },
+    )
+    .await
+    .unwrap();
+    let full_id = tag["full_id"].as_str().unwrap().to_string();
+
+    // Substring path (fresh ledger, no active memory) needs a contiguous match.
+    let search_args = || SearchLearningsArgs {
+        query: "flock is advisory".into(),
+        category: None,
+        min_confidence: 0.0,
+        limit: 10,
+        project_dir: None,
+    };
+
+    // Before contesting: retrievable.
+    let before = impls::search_learnings(&server, search_args())
+        .await
+        .unwrap();
+    assert_eq!(
+        before["results"].as_array().unwrap().len(),
+        1,
+        "sourced learning must be retrievable before it is contested"
+    );
+
+    // A Failure on an Extracted fact contests it (no decrement; reclassified).
+    impls::record_outcome(
+        &server,
+        RecordOutcomeArgs {
+            learning_id: full_id[..8].to_string(),
+            result: "failure".into(),
+            comment: Some("contradicted in practice".into()),
+            project_dir: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Now Contested -> excluded from default retrieval even though confidence is
+    // still high (freshly contested, before any decay).
+    let after = impls::search_learnings(&server, search_args())
+        .await
+        .unwrap();
+    assert_eq!(
+        after["results"].as_array().unwrap().len(),
+        0,
+        "contested learning must be excluded from search"
+    );
+
+    // ...but it is still on disk: a direct get_learning by id still finds it.
+    let detail = impls::get_learning(
+        &server,
+        GetLearningArgs {
+            learning_id: full_id[..8].to_string(),
+            show_outcomes: true,
+            show_decay: false,
+            project_dir: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        detail["id"], full_id,
+        "contested fact must be kept on disk for audit, not deleted"
+    );
+}

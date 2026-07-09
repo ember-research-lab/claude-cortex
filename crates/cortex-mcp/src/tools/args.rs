@@ -75,6 +75,18 @@ pub struct RecordOutcomeArgs {
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct RecordCorroborationArgs {
+    /// Learning ID to update.
+    pub learning_id: String,
+    /// Optional context about the re-observation.
+    #[serde(default)]
+    pub context: Option<String>,
+    /// Project directory, or null for global ledger.
+    #[serde(default)]
+    pub project_dir: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ListLearningsArgs {
     /// Minimum confidence threshold (0.0 - 1.0).
     #[serde(default = "default_min_confidence_list")]
