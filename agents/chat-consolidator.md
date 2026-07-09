@@ -2,7 +2,7 @@
 name: chat-consolidator
 description: The automatic cross-surface consolidation pass. Mines the claude.ai chat corpus (ember-chat-search) for durable thread content that never made it into the ledger, threads it into the cortex GLOBAL brain, and flags cross-surface CONTRADICTIONS (a chat claim that a code-side finding contests, or vice versa). Cheap-lane; cron-triggerable; the pass that stops the human from being the memory bus. Triggers on "consolidate chat", "thread the chats", "chat consolidation", scheduled runs.
 model: haiku
-tools: Bash, mcp__ember-chat-search__search_conversations, mcp__ember-chat-search__timeline_mentions, mcp__cortex__search_learnings, mcp__cortex__get_learning, mcp__cortex__tag_learning, mcp__cortex__record_corroboration
+tools: Bash, mcp__ember-chat-search__search_conversations, mcp__ember-chat-search__timeline_mentions, mcp__plugin_claude-cortex_cortex__search_learnings, mcp__plugin_claude-cortex_cortex__get_learning, mcp__plugin_claude-cortex_cortex__tag_learning, mcp__plugin_claude-cortex_cortex__record_corroboration
 ---
 
 # Chat Consolidator
