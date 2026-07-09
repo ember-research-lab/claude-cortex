@@ -211,9 +211,11 @@ impl Ledger {
                     "learning {learning_id} not found in reinforcements"
                 ))
             })?;
-        let delta = crate::confidence::delta_for(result);
+        // v-next epistemic update: multiplicative, origin-conditioned.
+        let origin = reinforcement.origin;
         let new_confidence =
-            crate::confidence::apply_outcome_delta(reinforcement.confidence, result);
+            crate::confidence::apply_outcome_epistemic(reinforcement.confidence, result, origin);
+        let delta = new_confidence - reinforcement.confidence;
         let now = UtcTime::now();
         reinforcement.outcomes.push(ReinforcementOutcome {
             timestamp: now,
@@ -225,6 +227,18 @@ impl Ledger {
         reinforcement.outcome_count += 1;
         reinforcement.last_updated = now;
         reinforcement.last_applied = now;
+        // Reclassify origin from this outcome (dt = 0, so effective == stored).
+        // NOTE (deferred): `corroboration` is NOT incremented on the outcome path
+        // — it is a distinct re-observation signal that the capture layer will
+        // wire separately. Until then the promotion branch of `reclassify`
+        // (needs corroboration >= PROMOTE_CORROBORATION) is unreachable via
+        // record_outcome; the Extracted/Validated -> Contested branch is fully live.
+        reinforcement.origin = crate::confidence::reclassify(
+            origin,
+            new_confidence,
+            reinforcement.corroboration,
+            Some(result),
+        );
         let confidence = reinforcement.confidence;
         write_atomic_json(&self.reinforcements_path(), &reinforcements)?;
         Ok(confidence)
