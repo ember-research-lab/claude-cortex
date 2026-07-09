@@ -205,7 +205,13 @@ pub async fn recall_context(
         })
         .collect();
 
-    let g = cortex_graph::build_graph(&nodes, 5);
+    // edge_top_k = 0: build NO similarity edges. Measured that BM25-similarity
+    // edges are noise — `render` prints a node's outgoing edges, so any edge
+    // shows as a "similar_to" line regardless of traversal depth. With no edges,
+    // recall_context is an honest budget-bounded BM25 seed render. (This makes
+    // cortex-graph == cortex-similarity + render TODAY; the graph earns its keep
+    // only when REAL edges — code links, corroboration — are added.)
+    let g = cortex_graph::build_graph(&nodes, 0);
     let text = cortex_graph::query(&g, &args.question, depth, budget);
     Ok(json!({"context": text, "budget": budget, "error": null}))
 }
