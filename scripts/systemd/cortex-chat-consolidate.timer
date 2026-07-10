@@ -1,0 +1,12 @@
+[Unit]
+Description=Run cortex chat consolidation daily (no-op with zero cost unless the chat index changed)
+
+[Timer]
+# 07:20 local — staggered after dynasty-edge (07:05–07:15) and whale-signal
+# data-audit (06:30). The service self-gates on chat-index freshness, so a day
+# with no new export exits immediately at no API cost.
+OnCalendar=*-*-* 07:20:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

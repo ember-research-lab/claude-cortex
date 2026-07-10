@@ -1,0 +1,17 @@
+[Unit]
+Description=Cortex — cross-surface chat consolidation (fabric)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/aaron/ember-research-lab/claude-cortex/scripts/chat-consolidate.sh
+StandardOutput=journal
+StandardError=journal
+
+# Optional overrides (ANTHROPIC_API_KEY billing path, CORTEX_CONSOLIDATE_MODEL,
+# CORTEX_CONSOLIDATE_NTFY topic) sourced from ~/.cortex-consolidate.env if present.
+EnvironmentFile=-%h/.cortex-consolidate.env
+Environment=HOME=/home/aaron
+Environment=PATH=/home/aaron/.local/bin:/home/aaron/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+TimeoutStartSec=1800
