@@ -1,0 +1,9 @@
+[Unit]
+Description=Check for + download a ready claude.ai export (every 4h; no-op until one is ready)
+
+[Timer]
+OnCalendar=*-*-* 00/4:10:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
