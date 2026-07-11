@@ -1,0 +1,13 @@
+[Unit]
+Description=Ingest a new claude.ai export zip and trigger consolidation
+
+[Service]
+Type=oneshot
+ExecStart=/home/aaron/ember-research-lab/claude-cortex/scripts/refresh-corpus.sh
+StandardOutput=journal
+StandardError=journal
+
+EnvironmentFile=-%h/.cortex-consolidate.env
+Environment=HOME=/home/aaron
+Environment=PATH=/home/aaron/.local/bin:/home/aaron/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+TimeoutStartSec=1800

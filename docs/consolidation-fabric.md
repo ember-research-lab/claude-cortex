@@ -114,6 +114,13 @@ evidence discipline before they can be "verified".
    per-repo orchestrators (reads this brain, dispatches) — replacing the human
    router.
 
+## Shipped (status 2026-07-11)
+Implemented in [`../scripts/`](../scripts/) (see `scripts/README.md` + `scripts/export-automation/SETUP.md`):
+- **Step 0 — cross-agent unlock:** DONE. `cortex-mcp` registered in Grok; Grok reads the brain headless.
+- **Step 2 — multi-surface ingest (chat):** DONE (safe form). The producer (`consolidate_run.py`) extracts → **independently provenance-verifies** → contradiction-gates → queues **review items**; a human drains (`cortex_review.py`). Key correction vs the original plan: full-autonomous *commit* is unsafe (contradiction detection is recall-limited), so the commit is human-in-loop while the tedium is automated. Runs on the Claude subscription.
+- **Step 4 — chat-export automation:** DONE + proven end-to-end. Standalone Playwright (headed to pass Cloudflare, cookie auth) requests + downloads the export; Gmail-IMAP retrieves the link; a new zip auto-indexes and triggers the producer.
+- **Still open:** Step 1 (entity spine — currently flat `[chat]` tags + topic-neighbor annotation, not yet a resolved-entity graph), Step 3 (consolidated cross-surface read), Step 5 (hosted endpoint / meta-orchestrator).
+
 ## Success test (falsifiable, not "it compiled")
 From a repo unrelated to whale-signal, ask an agent (Claude **or** Grok) "what's
 the thread on the whale-signal ascent signal?" and get: the chat-side reasoning

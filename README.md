@@ -2,7 +2,7 @@
 
 Persistent memory that makes Claude Code smarter across sessions.
 
-cortex is a Claude Code plugin providing memory, learning, and continuous-improvement infrastructure. Learnings are recorded in a blockchain-style ledger with hash-chained, Ed25519-signed blocks and BLAKE3 content-addressed storage. Confidence updates with Success / Partial / Failure outcomes and decays on a 180-day half-life so old guidance fades unless reinforced.
+cortex is a Claude Code plugin providing memory, learning, and continuous-improvement infrastructure. Learnings are recorded in a blockchain-style ledger with hash-chained, Ed25519-signed blocks and SHA-256 content-addressed storage. Confidence updates with Success / Partial / Failure outcomes and decays on a 180-day half-life so old guidance fades unless reinforced.
 
 This is **v4** — a spectral-retrieval and handoff-substrate layer on top of the v3 Rust workspace. The on-disk substrate format is preserved exactly across both versions, so existing v2 ledgers continue to work.
 
@@ -14,7 +14,7 @@ cortex lives at `ember-research-lab/claude-cortex` (this repo). v2 (Python) rema
 |------|------|------|
 | v3.1 | Cargo workspace + plugin.json + CI | done |
 | v3.2 | `cortex-core` substrate (ledger, hash chain, signatures, Merkle, content store, v2 compat) | done |
-| v3.3 | `cortex-mcp` (rmcp 0.16, 12 tools — 7 ledger-grounded + handoff + 4 deferred entity-graph stubs) | done |
+| v3.3 | `cortex-mcp` (rmcp 0.16, 15 tools — ledger-grounded + handoff + `recall_context` + `record_corroboration` + entity-graph) | done |
 | v3.4 | `cortex-hooks` (session_start / post_tool_use / session_end binaries) | done |
 | v3.5 | Skills, agents, commands (markdown) — orientation injects at SessionStart | done |
 | v3.6 | `cortex-migrate` (v2 → v3 validation + transcription) | done |
@@ -24,6 +24,9 @@ cortex lives at `ember-research-lab/claude-cortex` (this repo). v2 (Python) rema
 | v4.4 | `cortex-monitor` + `cortex-dream` (spectrum history + trajectory classification) | done |
 | v4.5 | `cortex-handoff` (work-in-progress state capture, separate from the long-term ledger) | done |
 | v4.6 | Hook token optimization (compressed directive, result-aware skip, dedup window) | done |
+| 0.5.0 | v-next substrate: epistemic confidence (usage-driven, relax-to-prior), `recall_context`, `record_corroboration`, BM25 NL-search, `cortex-graph` | done |
+| 0.5.1 | Fix: cortex sub-agents received zero MCP tools (plugin-scoped tool-name grants) | done |
+| fabric | Cross-surface consolidation (`scripts/`): producer → verify → contradiction-gate → review queue; chat-export automation | done |
 
 **Performance:** hook cold start 3-5 ms (budget: 100 ms). MCP server startup-to-`tools/list` 10-14 ms (budget: 50 ms). cortex-dream pipeline under 60 s for ledgers <10 k entries.
 
@@ -55,6 +58,18 @@ claude-cortex/
 ```
 
 `agents/`, `skills/`, and `commands/` stay markdown — they are dispatched by Claude Code itself and remain language-agnostic across cortex versions.
+
+## Consolidation fabric (`scripts/`)
+
+Beyond the per-session plugin, cortex includes a **cross-surface consolidation fabric** that keeps the ledger fresh from the claude.ai **chat corpus** — the largest, least-connected memory surface — without the human being the memory bus. It runs on the **Claude subscription** (not the metered API) and is designed for **safe autonomy**: a producer extracts and *independently* provenance-verifies candidates, then queues them; a human drains a **review queue** for the one recall-limited judgment call (is a new claim a genuine contradiction of an existing one?). Nothing is written to the ledger autonomously.
+
+```
+chat export (auto: request → download)  →  index  →  producer (extract → verify → contradiction-gate)  →  review queue  →  you approve/reject  →  ledger
+```
+
+- **`scripts/`** — the consolidation pipeline (`consolidate_run.py`, `cortex_review.py`, `cortex_client.py`, …) and systemd timers. See [`scripts/README.md`](scripts/README.md).
+- **`scripts/export-automation/`** — fully-automatic claude.ai data-export request + download (standalone Playwright, headed to pass Cloudflare, cookie auth, IMAP retrieval). See [`scripts/export-automation/SETUP.md`](scripts/export-automation/SETUP.md).
+- **[`docs/consolidation-fabric.md`](docs/consolidation-fabric.md)** — the design of record (the "why").
 
 ## Local development
 
