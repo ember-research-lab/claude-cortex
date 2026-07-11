@@ -2,7 +2,7 @@
 
 Persistent memory that makes Claude Code smarter across sessions.
 
-cortex is a Claude Code plugin providing memory, learning, and continuous-improvement infrastructure. Learnings are recorded in a blockchain-style ledger with hash-chained, Ed25519-signed blocks and BLAKE3 content-addressed storage. Confidence updates with Success / Partial / Failure outcomes and decays on a 180-day half-life so old guidance fades unless reinforced.
+cortex is a Claude Code plugin providing memory, learning, and continuous-improvement infrastructure. Learnings are recorded in a blockchain-style ledger with hash-chained, Ed25519-signed blocks and SHA-256 content-addressed storage. Confidence updates with Success / Partial / Failure outcomes and decays on a 180-day half-life so old guidance fades unless reinforced.
 
 This is **v4** — a spectral-retrieval and handoff-substrate layer on top of the v3 Rust workspace. The on-disk substrate format is preserved exactly across both versions, so existing v2 ledgers continue to work.
 
