@@ -31,7 +31,7 @@ crates/cortex-episodic/      v5 episode capture + lazy outcome-gated eviction + 
 ```
 
 Plugin assets are **markdown and stay markdown** — Claude Code dispatches them, so they are language-agnostic across cortex versions:
-- `agents/` (10 agents, listed in `plugin.json`), `skills/` (cortex-orientation, handoff-management, learning-capture, ledger-knowledge), `commands/` (`/cortex-dream`, `/handoff`).
+- `agents/` (12 agents incl. consolidator + chat-consolidator, listed in `plugin.json`), `skills/` (cortex-orientation, handoff-management, learning-capture, ledger-knowledge), `commands/` (`/cortex-dream`, `/handoff`).
 - `hooks/hooks.json` wires SessionStart / PostToolUse / SessionEnd / PreCompact to the `cortex-*` binaries; `bin/` holds graceful-degradation shims used until the real binaries are built.
 
 ## The substrate / ledger — and why its format is inviolable
@@ -74,7 +74,7 @@ Requires Rust stable ≥ 1.85.
 
 ## Plugin packaging
 
-- `.claude-plugin/plugin.json` — manifest: declares the 10 agents and registers the `cortex` **MCP server** (`command: "cortex-mcp"`).
+- `.claude-plugin/plugin.json` — manifest: declares the 12 agents and registers the `cortex` **MCP server** (`command: "cortex-mcp"`).
 - `.mcp.json` — same MCP-server registration for direct (non-plugin) use.
 - Install pulls markdown + `plugin.json` + `bin/` shims, but does **not** build the Rust binaries — `install.sh` (or `cargo install --path crates/cortex-mcp|cortex-hooks|cortex-migrate --bins`) does, onto PATH. Binaries are never auto-updated on plugin upgrade; re-run the installer and restart Claude Code. See README "Upgrading."
 
