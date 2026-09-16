@@ -1,0 +1,11 @@
+[Unit]
+Description=Watch ~/Downloads for a new claude.ai export zip (event-driven ingest)
+
+[Path]
+# Fires the service whenever ~/Downloads changes; refresh-corpus.sh self-filters
+# to data-*.zip and is idempotent, so unrelated downloads are cheap no-ops.
+PathModified=/home/aaron/Downloads
+Unit=cortex-corpus-refresh.service
+
+[Install]
+WantedBy=default.target

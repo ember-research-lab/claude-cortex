@@ -1,0 +1,14 @@
+[Unit]
+Description=claude.ai export — retrieve
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/aaron/ember-research-lab/claude-cortex/scripts/export-automation/run-export.sh retrieve
+StandardOutput=journal
+StandardError=journal
+EnvironmentFile=-%h/.cortex-consolidate.env
+Environment=HOME=/home/aaron
+Environment=PATH=/home/aaron/.local/share/fnm/aliases/default/bin:/home/aaron/.local/bin:/home/aaron/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+TimeoutStartSec=900
