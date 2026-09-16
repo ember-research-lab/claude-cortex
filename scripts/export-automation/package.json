@@ -1,0 +1,7 @@
+{
+  "name": "cortex-export-automation",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Playwright automation for claude.ai data export (request + download) feeding the consolidation fabric",
+  "dependencies": { "playwright": "^1.48.0" }
+}

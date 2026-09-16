@@ -1,0 +1,9 @@
+# auth cookies — NEVER commit (claude.ai session secret)
+storageState.json
+# npm
+node_modules/
+package-lock.json
+# raw session secret (transient)
+.session-cookie
+# stray project-local cortex ledger created when claude -p runs here
+.claude/

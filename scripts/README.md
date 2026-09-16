@@ -8,6 +8,14 @@ for the "why".
 ## Flow
 
 ```
+── upstream: chat-export automation (scripts/export-automation/, see SETUP.md) ──
+cortex-export-request.timer  (weekly)  ─► run-export.sh request ─► export-bot.js request   (headed Playwright, past Cloudflare)
+                                                  claude.ai processes ASYNC ─► emails the ready link
+cortex-export-retrieve.timer (every 4h)─► run-export.sh retrieve ─► retrieve.py (Gmail IMAP → URL) ─► export-bot.js download ─► ~/Downloads/data-*.zip
+                                                                                                              │
+cortex-corpus-refresh.path (watch ~/Downloads) ─► refresh-corpus.sh ─► ember-chat-search index + semantic-index
+                                                                                                              │  (fresh corpus)
+── consolidation ─────────────────────────────────────────────────────────────── ▼
 cortex-chat-consolidate.timer   (cheap freshness heartbeat; zero cost on quiet days)
         │
         ▼
@@ -34,6 +42,8 @@ chat-consolidate.sh  ──►  consolidate_run.py "<scope>" --review
 | `cortex_review.py` | Drain the review queue: `list` (conflicts + neighbors first), `approve <id> [--force-tag]`, `reject <id>`, `approve-clean` (only truly-novel items). |
 | `cortex_client.py` | Reliable direct cortex-mcp stdio client — the write path. Sidesteps the headless plugin-MCP connection race; a fresh process connects in ~0.02s. |
 | `ledger_count.py` | Independent `total_learnings` count via the public MCP interface (format-stable). |
+| `refresh-corpus.sh` | Event-driven ingest tail: a new `~/Downloads/data-*.zip` → `ember-chat-search index` + `semantic-index` → trigger the consolidation producer. |
+| `export-automation/` | Fully-automatic claude.ai export **request + download** (standalone Playwright, headed to pass Cloudflare; cookie auth; IMAP retrieval). See [`export-automation/SETUP.md`](export-automation/SETUP.md) — setup + 9 verified gotchas. |
 
 ## Safety model
 
@@ -48,14 +58,18 @@ chat-consolidate.sh  ──►  consolidate_run.py "<scope>" --review
 ## Setup
 
 ```sh
-# install the daily heartbeat (fills the queue; no-op at zero cost when no new export)
-cp scripts/systemd/cortex-chat-consolidate.* ~/.config/systemd/user/
+# consolidation heartbeat + event-driven corpus ingest
+cp scripts/systemd/cortex-chat-consolidate.* scripts/systemd/cortex-corpus-refresh.* ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now cortex-chat-consolidate.timer
+systemctl --user enable --now cortex-chat-consolidate.timer cortex-corpus-refresh.path
 
 # optional overrides in ~/.cortex-consolidate.env:
 #   CORTEX_CONSOLIDATE_MODEL=sonnet     # driver model
-#   CORTEX_CONSOLIDATE_NTFY=<topic>     # push a summary on new review items
+#   CORTEX_CONSOLIDATE_NTFY=<topic>     # push a summary on new review items / auth-expiry alerts
 ```
+
+For the upstream **chat-export automation** (auto request + download), follow
+[`export-automation/SETUP.md`](export-automation/SETUP.md) (cookie import, Gmail app-password,
+`cortex-export-*` timers).
 
 Drain whenever: `python3 scripts/cortex_review.py list`.
