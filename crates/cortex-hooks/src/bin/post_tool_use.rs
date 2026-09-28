@@ -18,9 +18,14 @@
 //!    hook input. Empty arrays, error payloads, and zero-hit search
 //!    results suppress the nudge entirely.
 //! 3. **Cross-process dedup window** via a sidecar at
-//!    `<cache_dir>/cortex/hook-recent.json`. Same-tool fires within
-//!    `DEDUP_WINDOW_SECS` are suppressed; parallel bursts collapse to a
-//!    single nudge. The file is updated atomically (temp + rename).
+//!    `<cache_dir>/cortex/hook-recent.json`. Same-KIND fires within
+//!    `DEDUP_WINDOW_SECS` are suppressed. Since v0.5.2 the key is the
+//!    nudge kind (web / external-mcp / agent / recall), not the tool
+//!    name, and the window is session-scale (4h): the discipline is
+//!    standing, so one reminder per session per kind is enough — the
+//!    old per-tool 30s window re-emitted the identical directive dozens
+//!    of times per session across a session's MCP surface. The file is
+//!    updated atomically (temp + rename).
 //!
 //! ## Filter (allowlist, v0.3.4)
 //!
@@ -37,7 +42,7 @@ use cortex_hooks::{read_input, write_output, HookInput};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-const DEDUP_WINDOW_SECS: u64 = 30;
+const DEDUP_WINDOW_SECS: u64 = 4 * 3600;
 const DEDUP_FILE: &str = "cortex/hook-recent.json";
 
 #[derive(Debug, Deserialize, Default)]
@@ -90,10 +95,10 @@ fn build_directive(
         }
     }
     if let Some(path) = dedup_file {
-        if recently_fired(path, tool, input.session_id.as_deref()) {
+        if recently_fired(path, kind_key(kind), input.session_id.as_deref()) {
             return String::new();
         }
-        record_fire(path, tool, input.session_id.as_deref());
+        record_fire(path, kind_key(kind), input.session_id.as_deref());
     }
     compressed_directive(tool, kind)
 }
@@ -125,8 +130,9 @@ fn compressed_directive(tool: &str, kind: NudgeKind) -> String {
 /// worth capturing from this tool.
 fn tagging_directive(tool: &str, domain: &str) -> String {
     format!(
-        "# Discovery-Tagging Nudge\n\
-         `{tool}` ran. If its result revealed a durable pattern \
+        "# Discovery-Tagging Nudge (once per session — applies to all later \
+         results from this tool family too)\n\
+         `{tool}` ran. If a result reveals a durable pattern \
          ({domain}) not already in the ledger, capture via \
          `tag_learning`. Filters: **pattern not state** (will it be true \
          in a year?); **context not snippet** (43% snippet-distillation \
@@ -256,8 +262,19 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-fn dedup_key(tool: &str, session: Option<&str>) -> String {
-    format!("{}::{}", session.unwrap_or("_"), tool)
+/// Stable dedup-group name per nudge kind — the directive bodies are
+/// near-identical within a kind, so one firing covers the whole family.
+fn kind_key(kind: NudgeKind) -> &'static str {
+    match kind {
+        NudgeKind::Web => "web",
+        NudgeKind::ExternalMcp => "mcp",
+        NudgeKind::Agent => "agent",
+        NudgeKind::CortexRecall => "recall",
+    }
+}
+
+fn dedup_key(group: &str, session: Option<&str>) -> String {
+    format!("{}::{}", session.unwrap_or("_"), group)
 }
 
 fn read_state(path: &std::path::Path) -> DedupState {
@@ -294,7 +311,9 @@ fn record_fire(path: &std::path::Path, tool: &str, session: Option<&str>) {
     state.entries.insert(dedup_key(tool, session), now);
     // Prune stale entries (>1 hour) on each write so the file doesn't
     // grow unbounded across long-lived sessions.
-    state.entries.retain(|_, ts| now.saturating_sub(*ts) < 3600);
+    state
+        .entries
+        .retain(|_, ts| now.saturating_sub(*ts) < DEDUP_WINDOW_SECS * 2);
     let _ = write_state(path, &state);
 }
 
@@ -491,7 +510,7 @@ mod tests {
     }
 
     #[test]
-    fn dedup_does_not_suppress_different_tools() {
+    fn dedup_does_not_suppress_different_kinds() {
         let (_dir, path) = isolate_dedup_path();
         let (input_w, event_w) = input_with(
             "sess-A",
@@ -503,6 +522,27 @@ mod tests {
         );
         assert!(!build_directive(&input_w, &event_w, Some(&path)).is_empty());
         assert!(!build_directive(&input_m, &event_m, Some(&path)).is_empty());
+    }
+
+    #[test]
+    fn dedup_is_per_kind_not_per_tool() {
+        // Two DIFFERENT external-MCP tools in one session share a nudge
+        // kind — the second must be suppressed (the directive is a
+        // standing discipline, not per-tool news).
+        let (_dir, path) = isolate_dedup_path();
+        let (input_a, event_a) = input_with(
+            "sess-A",
+            json!({"tool_name": "mcp__github__list_issues", "tool_response": {"results": [{"x": 1}]}}),
+        );
+        let (input_b, event_b) = input_with(
+            "sess-A",
+            json!({"tool_name": "mcp__gmail__search_threads", "tool_response": {"results": [{"x": 1}]}}),
+        );
+        assert!(!build_directive(&input_a, &event_a, Some(&path)).is_empty());
+        assert!(
+            build_directive(&input_b, &event_b, Some(&path)).is_empty(),
+            "same-kind tool in same session should suppress"
+        );
     }
 
     #[test]
