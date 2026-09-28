@@ -4,6 +4,13 @@ All notable changes to claude-cortex are documented here. Format follows [Keep a
 
 ## [Unreleased]
 
+### Changed
+- **post_tool_use nudge dedup is per-kind, session-scale** (v0.5.2): the
+  Discovery-Tagging/Outcome-Capture nudges now fire once per session per nudge
+  kind (web / external-mcp / agent / recall; 4h window) instead of per tool
+  with a 30s burst window — a session touching several MCP servers previously
+  re-received the identical ~60-token directive on nearly every call.
+
 ### Added
 - **Consolidation fabric** (`scripts/`) — cross-surface chat consolidation, done *safely*. A producer extracts durable items from the claude.ai chat corpus, an **independent** pass provenance-verifies each against the source (catches overstatement/contradiction of the quote), a contradiction gate + topic-adjacent neighbor annotation flag conflicts, and survivors land in a **review queue** a human drains — **nothing is tagged autonomously** (contradiction detection is recall-limited, so the commit stays human-in-loop). Runs on the Claude **subscription**, not the metered API. Pieces: `consolidate_run.py`, `cortex_review.py`, `cortex_client.py` (reliable direct-MCP write path that sidesteps the headless plugin-MCP race), `ledger_count.py`, `chat-consolidate.sh` + systemd timers. See [`scripts/README.md`](scripts/README.md).
 - **Chat-export automation** (`scripts/export-automation/`) — fully-automatic claude.ai data-export **request + download** via standalone Playwright (headed to pass Cloudflare, `sessionKey`-cookie auth) + Gmail-IMAP retrieval; a new export zip → `ember-chat-search index` + `semantic-index` → consolidation producer. Proven end-to-end. [`SETUP.md`](scripts/export-automation/SETUP.md) documents setup + 9 verified gotchas (Cloudflare-needs-headed, SPA `networkidle`, WSLg, Gmail-not-in-headless-`claude -p`, cookie expiry, async export, no in-app download, fnm-node-under-systemd, per-export token).

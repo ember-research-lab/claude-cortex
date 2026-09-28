@@ -1,6 +1,6 @@
 {
   "name": "claude-cortex",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Persistent memory that makes Claude Code smarter across sessions",
   "author": {
     "name": "Ember Research Lab",
