@@ -131,13 +131,27 @@ fn consolidation_directive(state_root: &Path, source: &str) -> Option<String> {
         return None;
     }
     let ids = pending_episode_ids(state_root);
+    // Cap the listing: 115 pending IDs were being injected into every session
+    // start (~5 KB of UUIDs the model cannot act on). The consolidator reads
+    // the pending set itself; the session only needs to know it is non-empty.
+    const MAX_LISTED: usize = 8;
     let ids_list = if ids.is_empty() {
         String::from("(no episode IDs available)")
     } else {
-        ids.iter()
+        let mut list = ids
+            .iter()
+            .take(MAX_LISTED)
             .map(|id| format!("  - {id}"))
             .collect::<Vec<_>>()
-            .join("\n")
+            .join("\n");
+        if ids.len() > MAX_LISTED {
+            list.push_str(&format!(
+                "\n  - … and {} more ({} pending in total; the consolidator enumerates them)",
+                ids.len() - MAX_LISTED,
+                ids.len()
+            ));
+        }
+        list
     };
 
     let header = match source {
