@@ -81,6 +81,18 @@ fn dream_pipeline_runs_end_to_end() {
     assert!(current_pointer_path(&state_dir).is_file());
     let active = read_current(&state_dir).unwrap().expect("no current");
     assert_eq!(active.entries.len(), report.entries);
+    // The snapshot records which ledger blocks it covers (cortex-mcp uses this
+    // to detect a stale snapshot).
+    let index_hashes: Vec<String> = Ledger::open(&ledger_dir)
+        .unwrap()
+        .read_index()
+        .unwrap()
+        .blocks
+        .into_iter()
+        .map(|b| b.hash)
+        .collect();
+    assert!(!index_hashes.is_empty());
+    assert_eq!(active.source_block_hashes, index_hashes);
     // Each entry has a learning_id and projection_weight.
     for entry in &active.entries {
         assert!(!entry.learning_id.is_empty());

@@ -16,12 +16,25 @@ struct Args {
     /// explicit `project_dir` argument fall back to the global ledger.
     #[arg(long)]
     default_project_dir: Option<std::path::PathBuf>,
+
+    /// Register read tools only (no tag_learning / record_outcome /
+    /// record_corroboration / tag_handoff). Also enabled by CORTEX_READ_ONLY=1.
+    #[arg(long)]
+    read_only: bool,
+}
+
+fn env_read_only() -> bool {
+    std::env::var("CORTEX_READ_ONLY").is_ok_and(|v| matches!(v.trim(), "1" | "true" | "yes"))
 }
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let mut server = CortexServer::new();
+    let mut server = if args.read_only || env_read_only() {
+        CortexServer::new_read_only()
+    } else {
+        CortexServer::new()
+    };
     if let Some(dir) = args.default_project_dir {
         server = server.with_default_project_dir(dir);
     }
