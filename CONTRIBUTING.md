@@ -7,12 +7,9 @@ claude-cortex/
 ├── Cargo.toml                # Workspace root + pinned dep versions
 ├── crates/
 │   ├── cortex-core/          # Substrate: ledger, hash chain, signing, content store, Merkle, v2 compat
-│   ├── cortex-mcp/           # MCP server (rmcp 0.16, 12 tools)
+│   ├── cortex-mcp/           # MCP server (rmcp 0.16; 7 read tools + 4 write tools, writes off under --read-only)
 │   ├── cortex-hooks/         # session_start, post_tool_use, session_end binaries
 │   └── cortex-migrate/       # v2 → v3 ledger validation + transcription
-├── agents/                   # Markdown agent definitions (10 agents)
-├── skills/                   # Markdown skill definitions (4 skills)
-├── commands/                 # Markdown slash command definitions
 ├── tests/fixtures/v2_ledger/ # Real v2-format ledger for regression tests
 └── .github/workflows/        # CI + multi-platform release
 ```
