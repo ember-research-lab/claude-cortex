@@ -2,7 +2,9 @@
   "mcpServers": {
     "cortex": {
       "command": "cortex-mcp",
-      "args": [],
+      "args": [
+        "--read-only"
+      ],
       "env": {}
     }
   }

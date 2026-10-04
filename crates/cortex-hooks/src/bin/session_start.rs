@@ -1,12 +1,10 @@
 //! `cortex-session-start` — fired at the start of every Claude Code session.
 //!
 //! v0.4.0: orientation skill content is INJECTED directly via the
-//! SessionStart hook. This decouples orientation availability from the
-//! Skill-tool surfacing mechanism (which depends on plugin-loader
-//! discovery quirks and trigger-phrase matching). The cortex-orientation
-//! SKILL.md remains the single source of truth — it's embedded via
-//! `include_str!` at compile time, so the hook output and the skill
-//! body can never drift.
+//! SessionStart hook. Since v0.6.0 the plugin no longer wires this hook
+//! (cortex is paused; see CHANGELOG), and the orientation skill was removed;
+//! the text lives on as `assets/orientation.md`, embedded via `include_str!`
+//! so the binary keeps working if the hook is re-enabled.
 //!
 //! v0.5.0 (Phase 3): if pending (unconsolidated) episodes exist in the
 //! episodic store, appends a consolidation directive instructing the agent
@@ -32,10 +30,9 @@ const TOP_K: usize = 8;
 /// confirmation (TTL backstop).
 const TTL_DAYS: u32 = 30;
 
-/// Full cortex-orientation skill body, embedded at compile time. Single
-/// source of truth: edit `skills/cortex-orientation/SKILL.md` and the
-/// hook picks up the change on next rebuild.
-const ORIENTATION_SKILL: &str = include_str!("../../../../skills/cortex-orientation/SKILL.md");
+/// Orientation text, embedded at compile time from `assets/orientation.md`
+/// (formerly the cortex-orientation skill).
+const ORIENTATION_SKILL: &str = include_str!("../../assets/orientation.md");
 
 fn main() {
     let input = read_input();

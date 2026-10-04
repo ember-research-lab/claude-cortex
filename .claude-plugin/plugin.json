@@ -1,7 +1,7 @@
 {
   "name": "claude-cortex",
-  "version": "0.5.2",
-  "description": "Persistent memory that makes Claude Code smarter across sessions",
+  "version": "0.6.0",
+  "description": "Cross-repo READ recall over cortex ledgers (read-only MCP). Paused: no hooks, skills, or agents; writes are off until measured.",
   "author": {
     "name": "Ember Research Lab",
     "email": "emberresearchlab@gmail.com",
@@ -10,25 +10,19 @@
   "license": "MIT",
   "homepage": "https://github.com/ember-research-lab/claude-cortex",
   "repository": "https://github.com/ember-research-lab/claude-cortex",
-  "keywords": ["ledger", "memory", "learning", "reinforcement", "blockchain"],
-  "agents": [
-    "./agents/bug-investigator.md",
-    "./agents/chat-consolidator.md",
-    "./agents/code-implementer.md",
-    "./agents/consolidator.md",
-    "./agents/falsifier-spec.md",
-    "./agents/knowledge-retriever.md",
-    "./agents/outcome-recorder.md",
-    "./agents/refactorer.md",
-    "./agents/research-agent.md",
-    "./agents/task-decomposer.md",
-    "./agents/test-writer.md",
-    "./agents/verifier.md"
+  "keywords": [
+    "ledger",
+    "memory",
+    "learning",
+    "reinforcement",
+    "blockchain"
   ],
   "mcpServers": {
     "cortex": {
       "command": "cortex-mcp",
-      "args": [],
+      "args": [
+        "--read-only"
+      ],
       "env": {}
     }
   }
