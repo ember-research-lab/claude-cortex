@@ -604,8 +604,8 @@ dependencies = [
 
 [[package]]
 name = "ember-crypto"
-version = "0.1.0"
-source = "git+https://github.com/ember-research-lab/ember-crypto?tag=v0.1.0#51509c7c5e6d287e286b844edea3c66359126554"
+version = "0.1.1"
+source = "git+https://github.com/ember-research-lab/ember-crypto?tag=v0.1.1#a6813353525af7e96169522d3d5a5a8e35a2cc0f"
 dependencies = [
  "ed25519-dalek",
  "rand",
