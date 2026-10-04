@@ -33,7 +33,11 @@ All notable changes to claude-cortex are documented here. Format follows [Keep a
 ### Fixed
 - **B1** Search used a stale spectral snapshot whenever one existed, returning frozen, unrelated hits at resonance 0. It now uses the snapshot only when it covers every block in the index; otherwise BM25 with `"snapshot_stale": true, "uncovered": N`. Legacy snapshots (no block hashes) count as stale. Zero-score hits are always dropped.
 - **B3** Application errors return `isError=true` with the JSON body kept.
-- **B4** With no `project_dir`, `search_learnings`, `get_learning` and `get_handoff` search the cwd's project ledger, then global, and say which answered. `get_handoff` no longer returns the global handoff for every project.
+- **B4** With no `project_dir`, all read tools (`search_learnings`, `get_learning`, `get_handoff`, `list_learnings`, `ledger_stats`, `recall_context`, `get_session_summary`) search the cwd's project ledger, then global, and name which answered (`ledger`, `ledgers_searched`). `get_handoff` no longer returns the global handoff for every project.
+- A missing ledger is `isError=true` (`ledger_missing: ...` with the paths looked at) in every read tool instead of an empty success.
+- A corrupt active-memory snapshot is reported as `snapshot_error` in search (BM25 fallback is explicit, not silent).
+- `CORTEX_READ_ONLY` is parsed case-insensitively (1/true/yes/on vs 0/false/no/off); any other value is a startup error that names it, so a typo cannot leave a server writable.
+- `cortex-session-start` no longer tells the model to dispatch the removed `consolidator` agent or run `/cortex-dream`.
 
 ### Changed
 - Workspace version 0.4.0 -> 0.6.0 (it had lagged the plugin); `plugin.json` 0.5.2 -> 0.6.0.

@@ -67,7 +67,9 @@ fn resolve_ledger(
 /// An explicit `project_dir` (or the server default) means exactly that project
 /// ledger. With neither, the project ledger of the cwd comes first and the
 /// global ledger second, so recall from a project session sees project learnings
-/// (B4). Only ledgers that exist on disk are returned.
+/// (B4). Only ledgers that exist on disk are returned. If NONE exists this is an
+/// error naming every path looked at (surfaced as `isError`), never an empty
+/// success.
 fn read_candidates(
     server: &CortexServer,
     project_dir: Option<&str>,
@@ -75,29 +77,59 @@ fn read_candidates(
     let explicit = project_dir
         .map(PathBuf::from)
         .or_else(|| server.default_project_dir.clone());
+    let mut wanted: Vec<(&'static str, PathBuf)> = Vec::new();
     if let Some(dir) = explicit {
-        let p = project_ledger_path(Some(dir.as_path()))?;
-        return Ok(if p.is_dir() {
-            vec![("project", p)]
-        } else {
-            vec![]
-        });
-    }
-    let cwd = match &server.cwd_override {
-        Some(c) => c.clone(),
-        None => std::env::current_dir()?,
-    };
-    let mut out = Vec::new();
-    let project = project_ledger_path(Some(cwd.as_path()))?;
-    if project.is_dir() {
-        out.push(("project", project));
-    }
-    if let Some(g) = global_ledger(server) {
-        if g.is_dir() && !out.iter().any(|(_, p)| *p == g) {
-            out.push(("global", g));
+        wanted.push(("project", project_ledger_path(Some(dir.as_path()))?));
+    } else {
+        let cwd = match &server.cwd_override {
+            Some(c) => c.clone(),
+            None => std::env::current_dir()?,
+        };
+        wanted.push(("project", project_ledger_path(Some(cwd.as_path()))?));
+        if let Some(g) = global_ledger(server) {
+            if !wanted.iter().any(|(_, p)| *p == g) {
+                wanted.push(("global", g));
+            }
         }
     }
-    Ok(out)
+    let found: Vec<(&'static str, PathBuf)> =
+        wanted.iter().filter(|(_, p)| p.is_dir()).cloned().collect();
+    if found.is_empty() {
+        let looked: Vec<String> = wanted
+            .iter()
+            .map(|(l, p)| format!("{l} ledger {}", p.display()))
+            .collect();
+        return Err(anyhow!(
+            "ledger_missing: no cortex ledger found (looked for {})",
+            looked.join("; ")
+        ));
+    }
+    Ok(found)
+}
+
+/// Run `one` against each candidate ledger in order and return the first result
+/// for which `answered` holds, annotated with `"ledger"` (which one answered)
+/// and `"ledgers_searched"`. If none answered, the first result is returned
+/// with `"ledger": null`.
+fn across(
+    candidates: &[(&'static str, PathBuf)],
+    mut one: impl FnMut(&std::path::Path) -> anyhow::Result<Value>,
+    answered: impl Fn(&Value) -> bool,
+) -> anyhow::Result<Value> {
+    let searched = labels(candidates);
+    let mut first: Option<Value> = None;
+    for (label, path) in candidates {
+        let mut result = one(path)?;
+        result["ledger"] = json!(label);
+        result["ledgers_searched"] = json!(searched);
+        if answered(&result) {
+            return Ok(result);
+        }
+        first.get_or_insert(result);
+    }
+    let mut none = first.expect("read_candidates never returns empty");
+    none["ledger"] = Value::Null;
+    Ok(none)
 }
 
 fn labels(candidates: &[(&'static str, PathBuf)]) -> Vec<&'static str> {
@@ -242,16 +274,21 @@ pub async fn recall_context(
     // traversal. Callers can override `depth`.
     let depth = args.depth.unwrap_or(0);
 
-    let Some(path) = resolve_ledger(server, args.project_dir.as_deref())? else {
-        return Ok(json!({"context": "", "budget": budget, "error": null}));
-    };
-    let Some(_) = open_ledger(&path)? else {
-        return Ok(json!({"context": "", "budget": budget, "error": null}));
-    };
-    let reinforcements = {
-        let ledger = Ledger::open(&path)?;
-        ledger.read_reinforcements()?
-    };
+    let candidates = read_candidates(server, args.project_dir.as_deref())?;
+    across(
+        &candidates,
+        |path| recall_one(path, &args.question, depth, budget),
+        |r| r["context"].as_str().is_some_and(|c| !c.is_empty()),
+    )
+}
+
+fn recall_one(
+    path: &std::path::Path,
+    question: &str,
+    depth: usize,
+    budget: usize,
+) -> anyhow::Result<Value> {
+    let reinforcements = Ledger::open(path)?.read_reinforcements()?;
 
     let nodes: Vec<cortex_graph::LearningNode> = reinforcements
         .learnings
@@ -270,7 +307,7 @@ pub async fn recall_context(
     // cortex-graph == cortex-similarity + render TODAY; the graph earns its keep
     // only when REAL edges — code links, corroboration — are added.)
     let g = cortex_graph::build_graph(&nodes, 0);
-    let text = cortex_graph::query(&g, &args.question, depth, budget);
+    let text = cortex_graph::query(&g, question, depth, budget);
     Ok(json!({"context": text, "budget": budget, "error": null}))
 }
 
@@ -303,25 +340,11 @@ pub async fn search_learnings(
         None => None,
     };
     let candidates = read_candidates(server, args.project_dir.as_deref())?;
-    let searched = labels(&candidates);
-    let mut first: Option<Value> = None;
-    for (label, path) in &candidates {
-        let mut result = search_one(path, &args, category_filter)?;
-        result["ledger"] = json!(label);
-        result["ledgers_searched"] = json!(searched);
-        if result["total"].as_u64().unwrap_or(0) > 0 {
-            return Ok(result);
-        }
-        first.get_or_insert(result);
-    }
-    // Nothing matched anywhere (or no ledger exists): say so, and name no ledger.
-    let mut empty = first.unwrap_or_else(|| {
-        json!({"query": args.query, "category": args.category, "mode": "bm25",
-               "results": [], "total": 0})
-    });
-    empty["ledger"] = Value::Null;
-    empty["ledgers_searched"] = json!(searched);
-    Ok(empty)
+    across(
+        &candidates,
+        |path| search_one(path, &args, category_filter),
+        |r| r["total"].as_u64().unwrap_or(0) > 0,
+    )
 }
 
 fn search_one(
@@ -330,7 +353,12 @@ fn search_one(
     category_filter: Option<LearningCategory>,
 ) -> anyhow::Result<Value> {
     let ledger = Ledger::open(path)?;
-    let active = load_active_memory(path);
+    // A corrupt/unreadable snapshot is reported (`snapshot_error`), not swallowed.
+    let (active, snapshot_error) =
+        match cortex_active_memory::read_current(&path.join("cortex-state")) {
+            Ok(a) => (a, None),
+            Err(e) => (None, Some(e.to_string())),
+        };
     let reinforcements = ledger.read_reinforcements()?;
     let has_query = !args.query.trim().is_empty();
 
@@ -446,14 +474,14 @@ fn search_one(
         out["snapshot_stale"] = json!(true);
         out["uncovered"] = json!(n);
     }
+    if let Some(reason) = snapshot_error {
+        out["snapshot_error"] = json!(reason);
+    }
     Ok(out)
 }
 
 pub async fn get_learning(server: &CortexServer, args: GetLearningArgs) -> anyhow::Result<Value> {
     let candidates = read_candidates(server, args.project_dir.as_deref())?;
-    if candidates.is_empty() {
-        return Ok(json!({"error": "Ledger not found"}));
-    }
     let mut found = None;
     for (label, path) in &candidates {
         let ledger = Ledger::open(path)?;
@@ -597,14 +625,21 @@ pub async fn list_learnings(
         Some(c) => Some(parse_category(c)?),
         None => None,
     };
-    let Some(path) = resolve_ledger(server, args.project_dir.as_deref())? else {
-        return Ok(json!({"learnings": [], "total": 0}));
-    };
-    let Some(_) = open_ledger(&path)? else {
-        return Ok(json!({"learnings": [], "total": 0}));
-    };
-    let active = load_active_memory(&path);
-    let reinforcements = Ledger::open(&path)?.read_reinforcements()?;
+    let candidates = read_candidates(server, args.project_dir.as_deref())?;
+    across(
+        &candidates,
+        |path| list_one(path, &args, category_filter),
+        |r| r["total"].as_u64().unwrap_or(0) > 0,
+    )
+}
+
+fn list_one(
+    path: &std::path::Path,
+    args: &ListLearningsArgs,
+    category_filter: Option<LearningCategory>,
+) -> anyhow::Result<Value> {
+    let active = load_active_memory(path);
+    let reinforcements = Ledger::open(path)?.read_reinforcements()?;
     let mut entries: Vec<(String, Reinforcement, f64)> = reinforcements
         .learnings
         .into_iter()
@@ -656,13 +691,14 @@ pub async fn list_learnings(
 }
 
 pub async fn ledger_stats(server: &CortexServer, args: LedgerStatsArgs) -> anyhow::Result<Value> {
-    let Some(path) = resolve_ledger(server, args.project_dir.as_deref())? else {
-        return Ok(json!({"error": "Ledger not found", "exists": false}));
-    };
-    let Some(ledger) = open_ledger(&path)? else {
-        return Ok(json!({"error": "Ledger not found", "exists": false, "path": path}));
-    };
-    let active = load_active_memory(&path);
+    // Stats describe one ledger: the first that exists (project of cwd, else global).
+    let candidates = read_candidates(server, args.project_dir.as_deref())?;
+    across(&candidates, ledger_stats_one, |_| true)
+}
+
+fn ledger_stats_one(path: &std::path::Path) -> anyhow::Result<Value> {
+    let ledger = Ledger::open(path)?;
+    let active = load_active_memory(path);
     let reinforcements = ledger.read_reinforcements()?;
     let mut by_category: Map<String, Value> = Map::new();
     let mut high = 0u64;
@@ -731,9 +767,19 @@ pub async fn get_session_summary(
     server: &CortexServer,
     args: GetSessionSummaryArgs,
 ) -> anyhow::Result<Value> {
-    let Some((ledger, _)) = ledger_with_reinforcements(server, args.project_dir.as_deref())? else {
-        return Ok(json!({"summaries": [], "total": 0}));
-    };
+    let candidates = read_candidates(server, args.project_dir.as_deref())?;
+    across(
+        &candidates,
+        |path| session_summary_one(path, &args),
+        |r| r["total"].as_u64().unwrap_or(0) > 0,
+    )
+}
+
+fn session_summary_one(
+    path: &std::path::Path,
+    args: &GetSessionSummaryArgs,
+) -> anyhow::Result<Value> {
+    let ledger = Ledger::open(path)?;
     let index = ledger.read_index()?;
     // Group blocks by session_id, derive a lightweight summary per session.
     let mut sessions: Vec<(String, Vec<Block>)> = Vec::new();

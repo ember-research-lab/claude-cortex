@@ -173,6 +173,8 @@ async fn ledger_stats_reports_counts_by_category_and_confidence() {
 async fn get_handoff_returns_null_when_no_state_exists() {
     let project = TempDir::new().unwrap();
     let server = CortexServer::new().with_default_project_dir(project.path().into());
+    // The ledger must exist (a missing ledger is an error); it just has no handoff.
+    cortex_core::Ledger::open(project.path().join(".claude/cortex/ledger")).unwrap();
     let result = impls::get_handoff(&server, GetHandoffArgs::default())
         .await
         .unwrap();

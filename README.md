@@ -23,7 +23,10 @@ Why: the binding constraint is the top model's usage limit, and cortex's hooks, 
 **Read tools:** `search_learnings`, `recall_context`, `get_learning`, `list_learnings`, `ledger_stats`, `get_session_summary`, `get_handoff`.
 
 Read-path behavior (0.6.0):
-- With no `project_dir`, `search_learnings`, `get_learning` and `get_handoff` consult the project ledger of the server's cwd first, then the global ledger, and the result names which one answered (`"ledger": "project" | "global"`, plus `ledgers_searched`).
+- With no `project_dir`, every read tool consults the project ledger of the server's cwd first, then the global ledger. The first ledger that has an answer wins and the result names it (`"ledger": "project" | "global"`, or `null` if none answered, plus `ledgers_searched`). `ledger_stats` describes the first ledger that exists.
+- **A missing ledger is an error**, not an empty success: `isError=true` with a message beginning `ledger_missing:` that lists the project and global paths looked at.
+- A corrupt or unreadable spectral snapshot does not silently disable it: search falls back to BM25 and returns `snapshot_error` with the reason.
+- `CORTEX_READ_ONLY` accepts `1/true/yes/on` (case-insensitive) for read-only and `0/false/no/off/unset` for writable; any other value makes `cortex-mcp` refuse to start, naming the value.
 - Search uses the spectral snapshot only when it covers every block in the ledger index; otherwise it falls back to BM25 and returns `"snapshot_stale": true, "uncovered": N`. Zero-score hits are always dropped.
 - Application errors (not found, bad argument) come back with `isError=true`; the JSON body is kept.
 

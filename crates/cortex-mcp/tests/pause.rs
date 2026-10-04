@@ -69,6 +69,14 @@ fn get_args(id: &str) -> GetLearningArgs {
     }
 }
 
+fn list_args() -> ListLearningsArgs {
+    serde_json::from_value(serde_json::json!({})).unwrap()
+}
+
+fn summary_args() -> GetSessionSummaryArgs {
+    serde_json::from_value(serde_json::json!({})).unwrap()
+}
+
 fn project_ledger(root: &Path) -> PathBuf {
     root.join(".claude/cortex/ledger")
 }
@@ -354,4 +362,166 @@ async fn get_handoff_defaults_to_cwd_project_not_global() {
         .unwrap();
     assert_eq!(got["ledger"], "project");
     assert_eq!(got["handoff"]["context_notes"], "project handoff");
+}
+
+// ---------- B4 (remaining read tools) ----------
+
+#[tokio::test]
+async fn list_stats_recall_summary_use_cwd_project_then_global_and_label() {
+    let e = env();
+    let proj = CortexServer::new().with_default_project_dir(e.cwd.clone());
+    let glob = CortexServer::new().with_global_ledger(e.global.clone());
+    tag(&proj, "project tomita finding").await;
+    tag(&glob, "global zeta finding").await;
+    let r = reader(&e);
+
+    // Project ledger exists and has content: it answers.
+    let list = impls::list_learnings(&r, list_args()).await.unwrap();
+    assert_eq!(list["ledger"], "project");
+    assert_eq!(
+        list["ledgers_searched"],
+        serde_json::json!(["project", "global"])
+    );
+    let stats = impls::ledger_stats(&r, LedgerStatsArgs::default())
+        .await
+        .unwrap();
+    assert_eq!(stats["ledger"], "project");
+    assert_eq!(stats["total_learnings"], 1);
+    let rec = impls::recall_context(
+        &r,
+        RecallContextArgs {
+            question: "tomita".into(),
+            depth: None,
+            budget_chars: None,
+            project_dir: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(rec["ledger"], "project");
+    let sum = impls::get_session_summary(&r, summary_args())
+        .await
+        .unwrap();
+    assert_eq!(sum["ledger"], "project");
+
+    // Recall for a term only in global falls through and says so.
+    let rec = impls::recall_context(
+        &r,
+        RecallContextArgs {
+            question: "zeta".into(),
+            depth: None,
+            budget_chars: None,
+            project_dir: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(rec["ledger"], "global");
+    assert!(!rec["context"].as_str().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn list_falls_through_to_global_when_project_ledger_is_empty() {
+    let e = env();
+    // Project ledger dir exists but holds no learnings.
+    let _ = CortexServer::new().with_default_project_dir(e.cwd.clone());
+    cortex_core::Ledger::open(project_ledger(&e.cwd)).unwrap();
+    let glob = CortexServer::new().with_global_ledger(e.global.clone());
+    tag(&glob, "global only").await;
+    let list = impls::list_learnings(&reader(&e), list_args())
+        .await
+        .unwrap();
+    assert_eq!(list["ledger"], "global");
+}
+
+#[tokio::test]
+async fn missing_ledger_is_an_error_in_every_read_tool() {
+    let e = env(); // no ledger anywhere
+    let r = reader(&e);
+    let q = || RecallContextArgs {
+        question: "x".into(),
+        depth: None,
+        budget_chars: None,
+        project_dir: None,
+    };
+    let results = [
+        impls::run(impls::search_learnings(&r, search_args("x")))
+            .await
+            .unwrap(),
+        impls::run(impls::get_learning(&r, get_args("deadbeef")))
+            .await
+            .unwrap(),
+        impls::run(impls::list_learnings(&r, list_args()))
+            .await
+            .unwrap(),
+        impls::run(impls::ledger_stats(&r, LedgerStatsArgs::default()))
+            .await
+            .unwrap(),
+        impls::run(impls::recall_context(&r, q())).await.unwrap(),
+        impls::run(impls::get_session_summary(&r, summary_args()))
+            .await
+            .unwrap(),
+        impls::run(impls::get_handoff(&r, GetHandoffArgs::default()))
+            .await
+            .unwrap(),
+    ];
+    for res in results {
+        assert_eq!(res.is_error, Some(true));
+        let text = res.content[0].as_text().unwrap().text.clone();
+        assert!(text.contains("ledger_missing"), "{text}");
+        assert!(
+            text.contains("project ledger") && text.contains("global ledger"),
+            "{text}"
+        );
+    }
+}
+
+// ---------- corrupt snapshot is reported ----------
+
+#[tokio::test]
+async fn corrupt_snapshot_is_reported_not_swallowed() {
+    let dir = TempDir::new().unwrap();
+    let server = CortexServer::new().with_default_project_dir(dir.path().into());
+    tag(&server, "peptide docking note").await;
+    let active = project_ledger(dir.path()).join("cortex-state/active");
+    std::fs::create_dir_all(&active).unwrap();
+    std::fs::write(active.join("current"), "active-bad.json\n").unwrap();
+    std::fs::write(active.join("active-bad.json"), "{ not json").unwrap();
+
+    let res = impls::search_learnings(&server, search_args("peptide docking"))
+        .await
+        .unwrap();
+    assert_eq!(res["mode"], "bm25");
+    assert!(res["snapshot_error"]
+        .as_str()
+        .is_some_and(|s| !s.is_empty()));
+    assert_eq!(res["total"], 1);
+}
+
+// ---------- CORTEX_READ_ONLY parsing ----------
+
+#[test]
+fn read_only_env_parsing_is_case_insensitive_and_fail_closed() {
+    use cortex_mcp::server::parse_read_only_env as p;
+    for on in ["1", "true", "TRUE", "Yes", "on", "ON", " true "] {
+        assert_eq!(p(Some(on)), Ok(true), "{on}");
+    }
+    for off in ["0", "false", "FALSE", "No", "off", "", "  "] {
+        assert_eq!(p(Some(off)), Ok(false), "{off}");
+    }
+    assert_eq!(p(None), Ok(false));
+    let err = p(Some("tru")).unwrap_err();
+    assert!(err.contains("\"tru\""), "{err}");
+}
+
+#[test]
+fn binary_refuses_to_start_on_bad_read_only_env_and_honours_good_one() {
+    let bin = env!("CARGO_BIN_EXE_cortex-mcp");
+    let bad = std::process::Command::new(bin)
+        .env("CORTEX_READ_ONLY", "maybe")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!bad.status.success());
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("maybe"));
 }

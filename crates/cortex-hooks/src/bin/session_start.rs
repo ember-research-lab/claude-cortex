@@ -8,7 +8,7 @@
 //!
 //! v0.5.0 (Phase 3): if pending (unconsolidated) episodes exist in the
 //! episodic store, appends a consolidation directive instructing the agent
-//! to dispatch the `consolidator` agent before other work.
+//! to consolidate them (since 0.6.0 the directive only reports that cortex is paused).
 //!
 //! Output structure (in order):
 //!   1. Cortex Orientation directives (full skill body)
@@ -129,8 +129,8 @@ fn consolidation_directive(state_root: &Path, source: &str) -> Option<String> {
     }
     let ids = pending_episode_ids(state_root);
     // Cap the listing: 115 pending IDs were being injected into every session
-    // start (~5 KB of UUIDs the model cannot act on). The consolidator reads
-    // the pending set itself; the session only needs to know it is non-empty.
+    // start (~5 KB of UUIDs the model cannot act on). The session only
+    // needs to know the set is non-empty.
     const MAX_LISTED: usize = 8;
     let ids_list = if ids.is_empty() {
         String::from("(no episode IDs available)")
@@ -143,7 +143,7 @@ fn consolidation_directive(state_root: &Path, source: &str) -> Option<String> {
             .join("\n");
         if ids.len() > MAX_LISTED {
             list.push_str(&format!(
-                "\n  - … and {} more ({} pending in total; the consolidator enumerates them)",
+                "\n  - … and {} more ({} pending in total; see the episodic store)",
                 ids.len() - MAX_LISTED,
                 ids.len()
             ));
@@ -166,11 +166,9 @@ fn consolidation_directive(state_root: &Path, source: &str) -> Option<String> {
     Some(format!(
         "{header}\n\n\
          {ids_list}\n\n\
-         Dispatch the `consolidator` agent over these episode IDs to promote \
-         surviving learnings into the long-term ledger.\n\n\
-         After the consolidator has finished promoting learnings via tag_learning, \
-         run `/cortex-dream` to regenerate active memory so the new learnings are \
-         reflected immediately."
+         cortex is paused (0.6.0): the consolidation agent and the dream command \
+         were removed from the plugin, so nothing consolidates these episodes \
+         automatically. Re-enable per the README before relying on them."
     ))
 }
 
@@ -281,8 +279,8 @@ mod tests {
             "should include the pending episode id; got:\n{context}"
         );
         assert!(
-            context.contains("consolidator"),
-            "should mention the consolidator agent"
+            context.contains("cortex is paused"),
+            "should say cortex is paused"
         );
     }
 
@@ -300,8 +298,8 @@ mod tests {
             "should include the pending episode id; got:\n{context}"
         );
         assert!(
-            context.contains("consolidator"),
-            "should mention the consolidator agent"
+            context.contains("cortex is paused"),
+            "should say cortex is paused"
         );
     }
 
@@ -311,7 +309,7 @@ mod tests {
         let context = build_context(&[], Some(tmp.path()), "compact");
 
         assert!(
-            !context.contains("consolidator"),
+            !context.contains("cortex is paused"),
             "no consolidation directive when all episodes are Evictable; got:\n{context}"
         );
         assert!(
@@ -327,7 +325,7 @@ mod tests {
         let context = build_context(&[], Some(tmp.path()), "compact");
 
         assert!(
-            !context.contains("consolidator"),
+            !context.contains("cortex is paused"),
             "no consolidation directive when no manifest exists; got:\n{context}"
         );
         assert!(
@@ -337,28 +335,24 @@ mod tests {
     }
 
     #[test]
-    fn session_start_includes_dream_directive_after_consolidation() {
+    fn session_start_names_no_removed_components() {
         let (tmp, episode_id) = seed_manifest_with_episode(EpisodeStatus::Unconsolidated);
         let context = build_context(&[], Some(tmp.path()), "compact");
 
         // Must contain the consolidation directive.
         assert!(
-            context.contains("consolidator"),
-            "should mention the consolidator agent; got:\n{context}"
+            context.contains("cortex is paused"),
+            "should say cortex is paused; got:\n{context}"
         );
         assert!(
             context.contains(&episode_id),
             "should include the pending episode id; got:\n{context}"
         );
 
-        // Must also contain the dream re-index directive.
+        // No stale reference to removed agents/commands.
         assert!(
-            context.contains("cortex-dream"),
-            "should contain cortex-dream re-index directive; got:\n{context}"
-        );
-        assert!(
-            context.contains("regenerate active memory"),
-            "should explain why cortex-dream is invoked; got:\n{context}"
+            !context.contains("cortex-dream") && !context.contains("`consolidator`"),
+            "must not name removed components; got:\n{context}"
         );
     }
 
@@ -372,7 +366,7 @@ mod tests {
             "no cortex-dream directive when all episodes are non-pending; got:\n{context}"
         );
         assert!(
-            !context.contains("consolidator"),
+            !context.contains("cortex is paused"),
             "no consolidation directive when zero pending; got:\n{context}"
         );
     }
