@@ -525,3 +525,63 @@ fn binary_refuses_to_start_on_bad_read_only_env_and_honours_good_one() {
     assert!(!bad.status.success());
     assert!(String::from_utf8_lossy(&bad.stderr).contains("maybe"));
 }
+
+// ---------- snapshot errors surface in every tool and every ledger ----------
+
+fn corrupt_snapshot(ledger_dir: &Path) {
+    let active = ledger_dir.join("cortex-state/active");
+    std::fs::create_dir_all(&active).unwrap();
+    std::fs::write(active.join("current"), "active-bad.json\n").unwrap();
+    std::fs::write(active.join("active-bad.json"), "{ not json").unwrap();
+}
+
+#[tokio::test]
+async fn corrupt_snapshot_is_reported_by_get_learning_list_and_stats() {
+    let dir = TempDir::new().unwrap();
+    let server = CortexServer::new().with_default_project_dir(dir.path().into());
+    let id = tag(&server, "peptide docking note").await;
+    corrupt_snapshot(&project_ledger(dir.path()));
+
+    let got = impls::get_learning(&server, get_args(&id[..8]))
+        .await
+        .unwrap();
+    assert!(got["snapshot_errors"][0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("snapshot"));
+    let list = impls::list_learnings(&server, list_args()).await.unwrap();
+    assert!(list["snapshot_error"].as_str().is_some());
+    let stats = impls::ledger_stats(&server, LedgerStatsArgs::default())
+        .await
+        .unwrap();
+    assert!(stats["snapshot_error"].as_str().is_some());
+    assert_eq!(stats["confidence_mode"], "scalar");
+}
+
+#[tokio::test]
+async fn snapshot_error_from_unanswering_ledger_is_kept() {
+    let e = env();
+    // Project ledger: corrupt snapshot and NO match for the query.
+    let proj = CortexServer::new().with_default_project_dir(e.cwd.clone());
+    tag(&proj, "unrelated project note").await;
+    corrupt_snapshot(&project_ledger(&e.cwd));
+    // Global ledger answers.
+    let glob = CortexServer::new().with_global_ledger(e.global.clone());
+    tag(&glob, "zeta global finding").await;
+
+    let s = impls::search_learnings(&reader(&e), search_args("zeta"))
+        .await
+        .unwrap();
+    assert_eq!(s["ledger"], "global");
+    let errs = s["snapshot_errors"].as_array().unwrap();
+    assert_eq!(errs.len(), 1);
+    assert_eq!(errs[0]["ledger"], "project");
+
+    // Same for get_learning: id lives in global, project snapshot is corrupt.
+    let g = tag(&glob, "another global finding").await;
+    let got = impls::get_learning(&reader(&e), get_args(&g[..8]))
+        .await
+        .unwrap();
+    assert_eq!(got["ledger"], "global");
+    assert_eq!(got["snapshot_errors"][0]["ledger"], "project");
+}

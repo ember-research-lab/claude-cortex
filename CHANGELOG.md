@@ -35,9 +35,9 @@ All notable changes to claude-cortex are documented here. Format follows [Keep a
 - **B3** Application errors return `isError=true` with the JSON body kept.
 - **B4** With no `project_dir`, all read tools (`search_learnings`, `get_learning`, `get_handoff`, `list_learnings`, `ledger_stats`, `recall_context`, `get_session_summary`) search the cwd's project ledger, then global, and name which answered (`ledger`, `ledgers_searched`). `get_handoff` no longer returns the global handoff for every project.
 - A missing ledger is `isError=true` (`ledger_missing: ...` with the paths looked at) in every read tool instead of an empty success.
-- A corrupt active-memory snapshot is reported as `snapshot_error` in search (BM25 fallback is explicit, not silent).
+- A corrupt active-memory snapshot is reported (`snapshot_error`) by search, get_learning, list_learnings and ledger_stats, and `snapshot_errors` lists the error from every ledger searched, not only the one that answered (BM25/scalar fallback is explicit, not silent).
 - `CORTEX_READ_ONLY` is parsed case-insensitively (1/true/yes/on vs 0/false/no/off); any other value is a startup error that names it, so a typo cannot leave a server writable.
-- `cortex-session-start` no longer tells the model to dispatch the removed `consolidator` agent or run `/cortex-dream`.
+- `cortex-session-start` no longer directs consolidation: pending episodes yield only the note `cortex paused; N episodes pending, not consolidated`.
 
 ### Changed
 - Workspace version 0.4.0 -> 0.6.0 (it had lagged the plugin); `plugin.json` 0.5.2 -> 0.6.0.
