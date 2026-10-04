@@ -28,6 +28,10 @@ crates/cortex-monitor/       v4 spectrum history + trajectory classification.
 crates/cortex-dream/         v4 dreaming pipeline orchestrator (index → graph → decompose → snapshot).
 crates/cortex-handoff/       v4 work-in-progress state substrate (ephemeral; NOT the long-term ledger).
 crates/cortex-episodic/      v5 episode capture + lazy outcome-gated eviction + consolidation.
+crates/cortex-audit/         Signed, hash-chained ACTION-audit ledger (principal bound into the signed hash;
+                             unsigned entries fail verify). Distinct from the learning ledger.
+crates/cortex-confidence/    Durable, decaying per-BEHAVIOR confidence (same deltas + half-life as core).
+crates/cortex-graph/         Learnings → ember-graph subgraph (git dep, tag v0.2.0); token-budgeted query.
 ```
 
 Plugin assets are **markdown and stay markdown** — Claude Code dispatches them, so they are language-agnostic across cortex versions:
@@ -42,14 +46,11 @@ Hashing note (verified, easy to get wrong): despite the README/spec mentioning B
 
 ## House rules
 
-1. **`cargo fmt --all` and `cargo clippy --workspace --all-targets -- -D warnings` must be clean.** CI sets `RUSTFLAGS: -D warnings`; warnings fail the build.
-2. **Tests run on three OSes** — CI matrix is ubuntu / macos / windows (`cargo build` + `cargo test --workspace`). Don't assume Linux-only behavior (paths, line endings).
-3. **`cargo-deny check advisories bans sources` must pass** (`deny.toml`). No unknown registries/git sources; new advisories need an explicit, reasoned ignore.
-4. **Every workspace crate is `publish = false`** — these are not published to crates.io; they ship as built binaries via the marketplace/release pipeline.
-5. **Pin deps at the workspace root.** Versions live in `[workspace.dependencies]` in the root `Cargo.toml`; don't bump a single crate's dep without bumping the workspace line.
-6. **Performance budgets are real:** hook cold start < 100 ms, MCP typical response < 50 ms. Benchmark before declaring a phase done.
-7. **Commit format:** `type(scope): description — detail`, conventional types (`feat`, `fix`, `docs`, `chore`, `ci`, `test`, `refactor`). Scope is usually the crate (e.g. `feat(episodic): …`, `fix(install): …`).
-8. **Bump `plugin.json` `version` on every release** — Claude Code keys plugin updates on it; a `version-guard` CI job blocks a release tag whose `plugin.json` version mismatches.
+1. **Org bar: workspace `CLAUDE.md`.** Deltas: CI on ubuntu / macos / windows (don't assume Linux paths/line endings); commit scope = crate name (e.g. `feat(episodic): …`).
+2. **Every workspace crate is `publish = false`** — these are not published to crates.io; they ship as built binaries via the marketplace/release pipeline.
+3. **Pin deps at the workspace root.** Versions live in `[workspace.dependencies]` in the root `Cargo.toml`; don't bump a single crate's dep without bumping the workspace line.
+4. **Performance budgets are real:** hook cold start < 100 ms, MCP typical response < 50 ms. Benchmark before declaring a phase done.
+5. **Bump `plugin.json` `version` on every release** — Claude Code keys plugin updates on it; a `version-guard` CI job blocks a release tag whose `plugin.json` version mismatches.
 
 ## Commands
 
@@ -82,5 +83,3 @@ Requires Rust stable ≥ 1.85.
 
 - **New MCP tool:** args struct in `cortex-mcp/src/tools/args.rs` → impl in `tools/impls.rs` → `#[tool(...)]` decl in `server.rs` → integration test in `tests/tools.rs`.
 - **New hook:** binary in `cortex-hooks/src/bin/<name>.rs` → register `[[bin]]` in its `Cargo.toml` → entry in `plugin.json`/`hooks.json` → spawn-and-assert test in `tests/hooks.rs`.
-
-Only the above is stated from what's verifiable in the repo; when in doubt, check the source before relying on a claim.
