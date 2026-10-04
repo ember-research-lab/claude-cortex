@@ -11,6 +11,7 @@ use cortex_core::models::{
     Block, Learning, LearningCategory, OutcomeResult, Reinforcement, Reinforcements,
 };
 use cortex_core::Ledger;
+use rmcp::model::{CallToolResult, Content};
 use rmcp::ErrorData;
 use serde_json::{json, Map, Value};
 
@@ -18,19 +19,35 @@ use super::args::*;
 use crate::paths::{global_ledger_path, project_ledger_path};
 use crate::server::CortexServer;
 
-/// Convert an `anyhow::Result<Value>` into the rmcp tool string return type.
-/// On success, serializes the value to a single-line JSON string. Application
-/// errors (missing learnings, bad inputs) are reported as JSON `{"error": ...}`
-/// payloads so the agent receives the same shape as the v2 Python tools.
+/// Convert an `anyhow::Result<Value>` into an MCP tool result. The JSON body is
+/// always kept for the model. Application errors (a failed call, or a payload
+/// carrying a non-null `"error"`) set `isError=true` so the host and the model
+/// can tell failure from success.
 pub async fn run(
     future: impl std::future::Future<Output = anyhow::Result<Value>>,
-) -> Result<String, ErrorData> {
-    let value = match future.await {
-        Ok(v) => v,
-        Err(e) => json!({ "error": e.to_string() }),
+) -> Result<CallToolResult, ErrorData> {
+    let (value, is_error) = match future.await {
+        Ok(v) => {
+            let failed = v.get("error").is_some_and(|e| !e.is_null());
+            (v, failed)
+        }
+        Err(e) => (json!({ "error": e.to_string() }), true),
     };
-    serde_json::to_string(&value)
-        .map_err(|e| ErrorData::internal_error(format!("serialize tool result: {e}"), None))
+    let text = serde_json::to_string(&value)
+        .map_err(|e| ErrorData::internal_error(format!("serialize tool result: {e}"), None))?;
+    let content = vec![Content::text(text)];
+    Ok(if is_error {
+        CallToolResult::error(content)
+    } else {
+        CallToolResult::success(content)
+    })
+}
+
+fn global_ledger(server: &CortexServer) -> Option<PathBuf> {
+    server
+        .global_ledger_override
+        .clone()
+        .or_else(global_ledger_path)
 }
 
 fn resolve_ledger(
@@ -43,7 +60,48 @@ fn resolve_ledger(
     if let Some(default) = &server.default_project_dir {
         return Ok(Some(project_ledger_path(Some(default.as_path()))?));
     }
-    Ok(global_ledger_path())
+    Ok(global_ledger(server))
+}
+
+/// Ledgers a READ tool should consult, in order, each labelled for the response.
+/// An explicit `project_dir` (or the server default) means exactly that project
+/// ledger. With neither, the project ledger of the cwd comes first and the
+/// global ledger second, so recall from a project session sees project learnings
+/// (B4). Only ledgers that exist on disk are returned.
+fn read_candidates(
+    server: &CortexServer,
+    project_dir: Option<&str>,
+) -> anyhow::Result<Vec<(&'static str, PathBuf)>> {
+    let explicit = project_dir
+        .map(PathBuf::from)
+        .or_else(|| server.default_project_dir.clone());
+    if let Some(dir) = explicit {
+        let p = project_ledger_path(Some(dir.as_path()))?;
+        return Ok(if p.is_dir() {
+            vec![("project", p)]
+        } else {
+            vec![]
+        });
+    }
+    let cwd = match &server.cwd_override {
+        Some(c) => c.clone(),
+        None => std::env::current_dir()?,
+    };
+    let mut out = Vec::new();
+    let project = project_ledger_path(Some(cwd.as_path()))?;
+    if project.is_dir() {
+        out.push(("project", project));
+    }
+    if let Some(g) = global_ledger(server) {
+        if g.is_dir() && !out.iter().any(|(_, p)| *p == g) {
+            out.push(("global", g));
+        }
+    }
+    Ok(out)
+}
+
+fn labels(candidates: &[(&'static str, PathBuf)]) -> Vec<&'static str> {
+    candidates.iter().map(|(l, _)| *l).collect()
 }
 
 fn open_ledger(path: &std::path::Path) -> anyhow::Result<Option<Ledger>> {
@@ -216,6 +274,26 @@ pub async fn recall_context(
     Ok(json!({"context": text, "budget": budget, "error": null}))
 }
 
+/// Number of index blocks the snapshot was NOT built from. A snapshot built
+/// from `source_block_hashes` only covers the ledger while every current block
+/// hash is listed; legacy snapshots (empty list) therefore count as stale
+/// (fail-closed).
+fn uncovered_blocks(snapshot: &cortex_active_memory::ActiveMemory, ledger: &Ledger) -> usize {
+    let Ok(index) = ledger.read_index() else {
+        return usize::MAX;
+    };
+    let covered: std::collections::HashSet<&str> = snapshot
+        .source_block_hashes
+        .iter()
+        .map(String::as_str)
+        .collect();
+    index
+        .blocks
+        .iter()
+        .filter(|b| !covered.contains(b.hash.as_str()))
+        .count()
+}
+
 pub async fn search_learnings(
     server: &CortexServer,
     args: SearchLearningsArgs,
@@ -224,35 +302,70 @@ pub async fn search_learnings(
         Some(c) => Some(parse_category(c)?),
         None => None,
     };
-    let Some(path) = resolve_ledger(server, args.project_dir.as_deref())? else {
-        return Ok(json!({"results": [], "total": 0, "error": null}));
-    };
-    let Some(_) = open_ledger(&path)? else {
-        return Ok(json!({"results": [], "total": 0, "error": null}));
-    };
-    let active = load_active_memory(&path);
-    let reinforcements = {
-        let ledger = Ledger::open(&path)?;
-        ledger.read_reinforcements()?
+    let candidates = read_candidates(server, args.project_dir.as_deref())?;
+    let searched = labels(&candidates);
+    let mut first: Option<Value> = None;
+    for (label, path) in &candidates {
+        let mut result = search_one(path, &args, category_filter)?;
+        result["ledger"] = json!(label);
+        result["ledgers_searched"] = json!(searched);
+        if result["total"].as_u64().unwrap_or(0) > 0 {
+            return Ok(result);
+        }
+        first.get_or_insert(result);
+    }
+    // Nothing matched anywhere (or no ledger exists): say so, and name no ledger.
+    let mut empty = first.unwrap_or_else(|| {
+        json!({"query": args.query, "category": args.category, "mode": "bm25",
+               "results": [], "total": 0})
+    });
+    empty["ledger"] = Value::Null;
+    empty["ledgers_searched"] = json!(searched);
+    Ok(empty)
+}
+
+fn search_one(
+    path: &std::path::Path,
+    args: &SearchLearningsArgs,
+    category_filter: Option<LearningCategory>,
+) -> anyhow::Result<Value> {
+    let ledger = Ledger::open(path)?;
+    let active = load_active_memory(path);
+    let reinforcements = ledger.read_reinforcements()?;
+    let has_query = !args.query.trim().is_empty();
+
+    // Spectral retrieval only when the snapshot covers the current index head;
+    // a stale snapshot would rank a frozen subset and hide newer learnings (B1).
+    let mut snapshot_stale: Option<usize> = None;
+    let spectral = match &active {
+        Some(snapshot) if has_query => match uncovered_blocks(snapshot, &ledger) {
+            0 => Some(snapshot),
+            n => {
+                snapshot_stale = Some(n);
+                None
+            }
+        },
+        _ => None,
     };
 
-    // Phase 7: spectral retrieval if active memory exists. Otherwise the
-    // v3 substring path.
-    let mut scored: Vec<(String, Reinforcement, f64, f64, &'static str)> = Vec::new();
-    if let Some(snapshot) = &active {
-        // Build a BM25 index over the corpus and score the query against it.
-        let mut bm25 = cortex_similarity::Bm25Index::new();
-        for r in reinforcements.learnings.values() {
-            bm25.add(r.content_hash.clone(), &r.content);
-        }
-        bm25.recompute_stats();
-        let query_scores: std::collections::HashMap<String, f64> =
-            bm25.score_query(&args.query).into_iter().collect();
+    let mut bm25 = cortex_similarity::Bm25Index::new();
+    for r in reinforcements.learnings.values() {
+        bm25.add(r.content_hash.clone(), &r.content);
+    }
+    bm25.recompute_stats();
+    let query_scores: std::collections::HashMap<String, f64> =
+        bm25.score_query(&args.query).into_iter().collect();
+
+    let mut scored: Vec<(String, Reinforcement, f64, f64)> = Vec::new();
+    let mode = if let Some(snapshot) = spectral {
         let ranked = cortex_active_memory::spectral_query(snapshot, |node_id| {
             query_scores.get(&node_id.0).copied().unwrap_or(0.0)
         });
         for (entry, resonance) in ranked {
-            // Find this entry's reinforcement by learning_id.
+            // Zero-score hits are noise, never results.
+            if resonance <= 0.0 {
+                continue;
+            }
             let Some((id, r)) = reinforcements
                 .learnings
                 .iter()
@@ -260,39 +373,25 @@ pub async fn search_learnings(
             else {
                 continue;
             };
-            if let Some(filter) = category_filter {
-                if r.category != filter {
-                    continue;
-                }
+            if category_filter.is_some_and(|f| r.category != f) {
+                continue;
             }
             if cortex_core::confidence::is_contested(r.origin) {
                 continue; // Contested facts are quarantined from retrieval.
             }
-            let conf = confidence_with_spectral(r, id, active.as_ref());
+            let conf = confidence_with_spectral(r, id, Some(snapshot));
             if conf < args.min_confidence {
                 continue;
             }
-            scored.push((id.clone(), r.clone(), conf, resonance, "spectral"));
+            scored.push((id.clone(), r.clone(), conf, resonance));
         }
+        "spectral"
     } else {
-        // No active-memory snapshot: rank by BM25, NOT substring. Substring
-        // matching returns ZERO results for natural-language queries (measured:
-        // 3/3 NL queries returned nothing), making the ledger effectively
-        // unsearchable until a cortex-dream run exists. BM25 tokenizes, so
-        // term-overlap queries work regardless.
-        let mut bm25 = cortex_similarity::Bm25Index::new();
-        for r in reinforcements.learnings.values() {
-            bm25.add(r.content_hash.clone(), &r.content);
-        }
-        bm25.recompute_stats();
-        let query_scores: std::collections::HashMap<String, f64> =
-            bm25.score_query(&args.query).into_iter().collect();
-        let has_query = !args.query.trim().is_empty();
+        // BM25, not substring: substring returned nothing for natural-language
+        // queries (measured 3/3).
         for (id, r) in &reinforcements.learnings {
-            if let Some(filter) = category_filter {
-                if r.category != filter {
-                    continue;
-                }
+            if category_filter.is_some_and(|f| r.category != f) {
+                continue;
             }
             if cortex_core::confidence::is_contested(r.origin) {
                 continue; // Contested facts are quarantined from retrieval.
@@ -307,24 +406,20 @@ pub async fn search_learnings(
             if conf < args.min_confidence {
                 continue;
             }
-            scored.push((id.clone(), r.clone(), conf, relevance, "bm25"));
+            scored.push((id.clone(), r.clone(), conf, relevance));
         }
-        // Rank by BM25 relevance, tie-break by effective confidence.
         scored.sort_by(|a, b| {
             b.3.partial_cmp(&a.3)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then(b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal))
         });
-    }
+        "bm25"
+    };
     scored.truncate(args.limit);
-    let mode = scored
-        .first()
-        .map(|(_, _, _, _, m)| *m)
-        .unwrap_or("substring");
     let results: Vec<Value> = scored
         .iter()
         .enumerate()
-        .map(|(rank, (id, r, conf, resonance, _))| {
+        .map(|(rank, (id, r, conf, resonance))| {
             let snippet: String = r.content.chars().take(150).collect();
             let mut entry = json!({
                 "id": shortid(id),
@@ -340,31 +435,50 @@ pub async fn search_learnings(
             entry
         })
         .collect();
-    Ok(json!({
+    let mut out = json!({
         "query": args.query,
         "category": args.category,
         "mode": mode,
         "results": results,
         "total": results.len(),
-    }))
+    });
+    if let Some(n) = snapshot_stale {
+        out["snapshot_stale"] = json!(true);
+        out["uncovered"] = json!(n);
+    }
+    Ok(out)
 }
 
 pub async fn get_learning(server: &CortexServer, args: GetLearningArgs) -> anyhow::Result<Value> {
-    let Some(path) = resolve_ledger(server, args.project_dir.as_deref())? else {
+    let candidates = read_candidates(server, args.project_dir.as_deref())?;
+    if candidates.is_empty() {
         return Ok(json!({"error": "Ledger not found"}));
-    };
-    let Some(ledger) = open_ledger(&path)? else {
-        return Ok(json!({"error": "Ledger not found"}));
-    };
-    let active = load_active_memory(&path);
-    let reinforcements = ledger.read_reinforcements()?;
-    let Some((id, reinforcement)) = match_prefix(&reinforcements, &args.learning_id) else {
+    }
+    let mut found = None;
+    for (label, path) in &candidates {
+        let ledger = Ledger::open(path)?;
+        let reinforcements = ledger.read_reinforcements()?;
+        if match_prefix(&reinforcements, &args.learning_id).is_some() {
+            found = Some((*label, path.clone(), ledger, reinforcements));
+            break;
+        }
+    }
+    let Some((label, path, ledger, reinforcements)) = found else {
         return Ok(json!({
-            "error": format!("Learning '{}' not found", args.learning_id)
+            "error": format!(
+                "Learning '{}' not found (ledgers searched: {})",
+                args.learning_id,
+                labels(&candidates).join(", ")
+            ),
+            "ledgers_searched": labels(&candidates),
         }));
     };
+    let active = load_active_memory(&path);
+    let (id, reinforcement) =
+        match_prefix(&reinforcements, &args.learning_id).expect("matched above");
     let block = block_for_reinforcement(&ledger, reinforcement);
     let mut result = Map::new();
+    result.insert("ledger".into(), Value::String(label.to_string()));
     result.insert("id".into(), Value::String(id.clone()));
     result.insert(
         "category".into(),
@@ -705,18 +819,24 @@ fn handoff_to_json(h: &cortex_handoff::Handoff) -> Value {
 }
 
 pub async fn get_handoff(server: &CortexServer, args: GetHandoffArgs) -> anyhow::Result<Value> {
-    let state_root = handoff_state_root(server, args.project_dir.as_deref())?;
-    let found = match args.session_id.as_deref() {
-        Some(sid) => cortex_handoff::latest_for_session(&state_root, sid)?,
-        None => cortex_handoff::read_current(&state_root)?,
-    };
-    match found {
-        Some(h) => Ok(json!({ "handoff": handoff_to_json(&h) })),
-        None => Ok(json!({
-            "handoff": null,
-            "note": "No handoff found. Use tag_handoff to record one at a pause-point.",
-        })),
+    // Default is the cwd's project ledger, then global (B4); never global first.
+    let candidates = read_candidates(server, args.project_dir.as_deref())?;
+    for (label, path) in &candidates {
+        let state_root = path.join("cortex-state");
+        let found = match args.session_id.as_deref() {
+            Some(sid) => cortex_handoff::latest_for_session(&state_root, sid)?,
+            None => cortex_handoff::read_current(&state_root)?,
+        };
+        if let Some(h) = found {
+            return Ok(json!({ "handoff": handoff_to_json(&h), "ledger": label }));
+        }
     }
+    Ok(json!({
+        "handoff": null,
+        "ledger": null,
+        "ledgers_searched": labels(&candidates),
+        "note": "No handoff found. Use tag_handoff to record one at a pause-point.",
+    }))
 }
 
 pub async fn tag_handoff(server: &CortexServer, args: TagHandoffArgs) -> anyhow::Result<Value> {
@@ -734,47 +854,5 @@ pub async fn tag_handoff(server: &CortexServer, args: TagHandoffArgs) -> anyhow:
     Ok(json!({
         "handoff": handoff_to_json(&handoff),
         "stored_at": path.display().to_string(),
-    }))
-}
-
-// ===== deferred tools (substrate not yet ported) =====
-
-const DEFERRED_NOTE: &str = "Feature pending v3.x port. v3 ships with the ledger substrate; the \
-     entity graph and cross-project recommender are scheduled for \
-     follow-on releases. v4's spectral retrieval (cortex-spectral crate) \
-     subsumes much of this surface area.";
-
-pub async fn get_suggestions(
-    _server: &CortexServer,
-    _args: GetSuggestionsArgs,
-) -> anyhow::Result<Value> {
-    Ok(json!({
-        "suggestions": [],
-        "total": 0,
-        "error": DEFERRED_NOTE,
-    }))
-}
-
-pub async fn entity_search(
-    _server: &CortexServer,
-    _args: EntitySearchArgs,
-) -> anyhow::Result<Value> {
-    Ok(json!({
-        "results": [],
-        "total": 0,
-        "error": DEFERRED_NOTE,
-    }))
-}
-
-pub async fn entity_show(_server: &CortexServer, _args: EntityShowArgs) -> anyhow::Result<Value> {
-    Ok(json!({
-        "error": DEFERRED_NOTE,
-    }))
-}
-
-pub async fn entity_stats(_server: &CortexServer, _args: EntityStatsArgs) -> anyhow::Result<Value> {
-    Ok(json!({
-        "indexed": false,
-        "error": DEFERRED_NOTE,
     }))
 }

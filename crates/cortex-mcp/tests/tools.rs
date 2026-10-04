@@ -1,4 +1,4 @@
-//! Round-trip tests of the 12 MCP tools against a temporary project ledger.
+//! Round-trip tests of the MCP tools against a temporary project ledger.
 
 use cortex_mcp::tools::args::*;
 use cortex_mcp::tools::impls;
@@ -167,58 +167,6 @@ async fn ledger_stats_reports_counts_by_category_and_confidence() {
     assert_eq!(by_conf["high"], 1);
     assert_eq!(by_conf["medium"], 1);
     assert_eq!(by_conf["low"], 1);
-}
-
-#[tokio::test]
-async fn deferred_tools_return_pending_responses_with_correct_signatures() {
-    // get_handoff was a stub in v0.3.x; v0.4.0-rc1 wires it to the
-    // cortex-handoff substrate. The remaining deferred tools are the
-    // entity graph + cross-project recommender (v3.x territory).
-    let server = CortexServer::new();
-    let cases = [
-        impls::get_suggestions(
-            &server,
-            GetSuggestionsArgs {
-                limit: 5,
-                min_confidence: 0.5,
-                project_dir: None,
-            },
-        )
-        .await
-        .unwrap(),
-        impls::entity_search(
-            &server,
-            EntitySearchArgs {
-                query: "foo".into(),
-                entity_type: None,
-                limit: 20,
-                project_dir: None,
-            },
-        )
-        .await
-        .unwrap(),
-        impls::entity_show(
-            &server,
-            EntityShowArgs {
-                qualified_name: "x".into(),
-                show_dependencies: false,
-                show_dependents: false,
-                depth: 1,
-                project_dir: None,
-            },
-        )
-        .await
-        .unwrap(),
-        impls::entity_stats(&server, EntityStatsArgs::default())
-            .await
-            .unwrap(),
-    ];
-    for case in cases {
-        assert!(
-            case["error"].as_str().unwrap_or("").contains("pending"),
-            "expected 'pending' note, got: {case}"
-        );
-    }
 }
 
 #[tokio::test]

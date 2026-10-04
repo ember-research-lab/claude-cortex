@@ -52,6 +52,14 @@ pub fn run(
 ) -> anyhow::Result<DreamReport> {
     let ledger = Ledger::open(ledger_path)
         .with_context(|| format!("opening ledger at {}", ledger_path.display()))?;
+    // Read the index BEFORE the reinforcements: a block appended in between is
+    // then simply not claimed as covered, so the snapshot can only under-claim.
+    let source_block_hashes: Vec<String> = ledger
+        .read_index()?
+        .blocks
+        .into_iter()
+        .map(|b| b.hash)
+        .collect();
     let reinforcements = ledger.read_reinforcements()?;
 
     // Step 1 + 2: collect learnings, index BM25.
@@ -79,7 +87,9 @@ pub fn run(
     let eigendecomp = cortex_spectral::compute_eigendecomposition(&graph, k)?;
 
     // Step 5: active memory snapshot.
-    let active = cortex_active_memory::build_active_memory(&graph, &eigendecomp, k)?;
+    let mut active = cortex_active_memory::build_active_memory(&graph, &eigendecomp, k)?;
+    // Lets readers detect a stale snapshot (cortex-mcp search falls back to BM25).
+    active.source_block_hashes = source_block_hashes;
     let active_snapshot = cortex_active_memory::write_snapshot(state_path, &active)?;
 
     // Step 6: spectrum snapshot for cortex-monitor.
