@@ -1,46 +1,4 @@
 {
-  "description": "claude-cortex Rust hooks: orient on session start, discovery-tag after substantive tool calls, extract outcomes on session end. The hook commands resolve to bin/ shims (auto-added to PATH by Claude Code) until you build the real binaries with `bash \"$CLAUDE_PLUGIN_ROOT/install.sh\"`; until then the shims degrade gracefully (SessionStart prints install instructions, the rest no-op).",
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cortex-session-start"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cortex-post-tool-use"
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cortex-session-end"
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cortex-pre-compact",
-            "async": true
-          }
-        ]
-      }
-    ]
-  }
+  "description": "claude-cortex is paused (v0.6.0): no hooks are wired. The hook binaries (cortex-session-start, cortex-post-tool-use, cortex-session-end, cortex-pre-compact) and the bin/ shims are kept in the repo; to re-enable one, add it back under the matching event with command \"${CLAUDE_PLUGIN_ROOT}/bin/<name>\". See README.",
+  "hooks": {}
 }

@@ -2,9 +2,62 @@
 
 Persistent memory that makes Claude Code smarter across sessions.
 
+> **PAUSED as of 0.6.0 (2026-10-04).** The ledger is frozen (read-only) and the session machinery is removed. See [What cortex is now](#what-cortex-is-now-060-paused).
+
 cortex is a Claude Code plugin providing memory, learning, and continuous-improvement infrastructure. Learnings are recorded in a blockchain-style ledger with hash-chained, Ed25519-signed blocks and SHA-256 content-addressed storage. Confidence updates with Success / Partial / Failure outcomes and decays on a 180-day half-life so old guidance fades unless reinforced.
 
 This is **v4** — a spectral-retrieval and handoff-substrate layer on top of the v3 Rust workspace. The on-disk substrate format is preserved exactly across both versions, so existing v2 ledgers continue to work.
+
+## What cortex is now (0.6.0, paused)
+
+Why: the binding constraint is the top model's usage limit, and cortex's hooks, skills and agents cost or conflicted with more than they delivered (measured in `ember-review/AUDIT-2026-10-04-claude-cortex.md` and `REVIEW-2026-10-04-cortex-origins-and-value.md`: 0 skill calls in 30 days, about 2 KB of a 14 KB orientation ever delivered, Opus agents fighting the "Grok is the worker" routing). So the ledger is frozen and only cross-repo READ recall is kept.
+
+| Piece | State in 0.6.0 |
+|---|---|
+| Hooks (`hooks/hooks.json`) | **None wired.** The four binaries and `bin/` shims stay in the repo. |
+| MCP server | `cortex-mcp --read-only` (the plugin launches it that way). 7 read tools, each `readOnlyHint=true`. Write tools are **not registered**. "Feature pending" stub tools removed. |
+| Skills, slash commands | **Removed** (all 6; `/handoff`, `/cortex-dream`). |
+| Agents | **Removed** (12). Four moved to the user config, see below. |
+| Ledger | Frozen. Existing learnings stay searchable; nothing new is written. |
+
+**Read tools:** `search_learnings`, `recall_context`, `get_learning`, `list_learnings`, `ledger_stats`, `get_session_summary`, `get_handoff`.
+
+Read-path behavior (0.6.0):
+- With no `project_dir`, every read tool consults the project ledger of the server's cwd first, then the global ledger. The first ledger that has an answer wins and the result names it (`"ledger": "project" | "global"`, or `null` if none answered, plus `ledgers_searched`). `ledger_stats` describes the first ledger that exists.
+- **A missing ledger is an error**, not an empty success: `isError=true` with a message beginning `ledger_missing:` that lists the project and global paths looked at.
+- A corrupt or unreadable spectral snapshot does not silently disable it: search falls back to BM25 and returns `snapshot_error` with the reason.
+- `CORTEX_READ_ONLY` accepts `1/true/yes/on` (case-insensitive) for read-only and `0/false/no/off/unset` for writable; any other value makes `cortex-mcp` refuse to start, naming the value.
+- Search uses the spectral snapshot only when it covers every block in the ledger index; otherwise it falls back to BM25 and returns `"snapshot_stale": true, "uncovered": N`. Zero-score hits are always dropped.
+- Application errors (not found, bad argument) come back with `isError=true`; the JSON body is kept.
+
+### Re-enabling writes
+
+Writes come back only after harness step 0 measures their value. When that happens:
+
+- **MCP:** remove `--read-only` from `mcpServers.cortex.args` in `.claude-plugin/plugin.json` (and `.mcp.json`), and make sure `CORTEX_READ_ONLY` is not set. That registers `tag_learning`, `record_outcome`, `record_corroboration`, `tag_handoff`.
+- **Hooks:** add the wanted event back to `hooks/hooks.json` with `"command": "${CLAUDE_PLUGIN_ROOT}/bin/<cortex-session-start|cortex-post-tool-use|cortex-session-end|cortex-pre-compact>"`. The orientation text the SessionStart hook injects now lives in `crates/cortex-hooks/assets/orientation.md`.
+- Read the open audit items first (B2 truncation, B6 reinforcement lock, B7 stray ledgers, B8 hook input shapes, B9 grok host detection): they are fixed only for the read path in 0.6.0.
+
+### What moved where
+
+| Was in the plugin | Now |
+|---|---|
+| agents `verifier`, `code-implementer`, `research-agent`, `bug-investigator` | `~/.claude/agents/` (user config), pinned to `model: sonnet`, full report to `~/ember-review/_agent-reports/`, reply capped at 300 words. `verifier` calls MCP `grok_verify` for the cross-family check; `research-agent` tries `grok_research` / `grok_ask` first. |
+| agents `falsifier-spec`, `task-decomposer`, `test-writer`, `refactorer`, `knowledge-retriever`, `outcome-recorder`, `consolidator`, `chat-consolidator` | Removed (0 to 2 uses each). |
+| skills `cortex-orientation`, `handoff-management`, `learning-capture`, `ledger-knowledge`; commands `cortex-dream`, `handoff` | Removed. Orientation text kept as `crates/cortex-hooks/assets/orientation.md`. |
+
+### Rebuilding the installed `cortex-mcp`
+
+grok launches `~/.local/bin/cortex-mcp` (see `[mcp_servers.cortex]` in `~/.grok/config.toml`); the plugin launches whatever `cortex-mcp` is first on PATH. Neither rebuilds it. From a checkout of this repo:
+
+```sh
+bash install.sh                          # builds release, installs all binaries to ~/.local/bin
+# or just the server:
+cargo build --release -p cortex-mcp && install -m 0755 target/release/cortex-mcp ~/.local/bin/cortex-mcp
+cortex-mcp --version                     # expect 0.6.0
+```
+
+Then point grok at `args = ["--read-only"]` (or `env CORTEX_READ_ONLY=1`) and restart grok and Claude Code.
 
 ## Status
 
@@ -14,7 +67,7 @@ cortex lives at `ember-research-lab/claude-cortex` (this repo). v2 (Python) rema
 |------|------|------|
 | v3.1 | Cargo workspace + plugin.json + CI | done |
 | v3.2 | `cortex-core` substrate (ledger, hash chain, signatures, Merkle, content store, v2 compat) | done |
-| v3.3 | `cortex-mcp` (rmcp 0.16, 15 tools — ledger-grounded + handoff + `recall_context` + `record_corroboration` + entity-graph) | done |
+| v3.3 | `cortex-mcp` (rmcp 0.16, ledger-grounded + handoff + `recall_context` + `record_corroboration`; entity-graph stubs removed in 0.6.0) | done |
 | v3.4 | `cortex-hooks` (session_start / post_tool_use / session_end binaries) | done |
 | v3.5 | Skills, agents, commands (markdown) — orientation injects at SessionStart | done |
 | v3.6 | `cortex-migrate` (v2 → v3 validation + transcription) | done |
@@ -26,6 +79,7 @@ cortex lives at `ember-research-lab/claude-cortex` (this repo). v2 (Python) rema
 | v4.6 | Hook token optimization (compressed directive, result-aware skip, dedup window) | done |
 | 0.5.0 | v-next substrate: epistemic confidence (usage-driven, relax-to-prior), `recall_context`, `record_corroboration`, BM25 NL-search, `cortex-graph` | done |
 | 0.5.1 | Fix: cortex sub-agents received zero MCP tools (plugin-scoped tool-name grants) | done |
+| 0.6.0 | **Pause**: hooks, skills, agents removed; `cortex-mcp --read-only`; read-path fixes B1/B3/B4 | done |
 | fabric | Cross-surface consolidation (`scripts/`): producer → verify → contradiction-gate → review queue; chat-export automation | done |
 
 **Performance:** hook cold start 3-5 ms (budget: 100 ms). MCP server startup-to-`tools/list` 10-14 ms (budget: 50 ms). cortex-dream pipeline under 60 s for ledgers <10 k entries.
@@ -49,15 +103,11 @@ claude-cortex/
 │   ├── cortex-monitor/       # v4 spectrum history + trajectory classifier
 │   ├── cortex-dream/         # v4 dreaming pipeline orchestrator
 │   └── cortex-handoff/       # v4 work-in-progress state substrate
-├── agents/                   # Markdown agent definitions (10)
-├── skills/                   # Markdown skill definitions (4)
-├── commands/                 # Slash commands (/handoff, /cortex-dream)
-├── hooks/hooks.json          # SessionStart / PostToolUse / SessionEnd wiring
+├── bin/                      # shims for the hook binaries (unused while paused)
+├── hooks/hooks.json          # empty while paused (no hooks wired)
 ├── tests/                    # Workspace integration tests + v2 fixtures
 └── .github/workflows/        # CI + release pipelines
 ```
-
-`agents/`, `skills/`, and `commands/` stay markdown — they are dispatched by Claude Code itself and remain language-agnostic across cortex versions.
 
 ## Consolidation fabric (`scripts/`)
 

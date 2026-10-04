@@ -53,30 +53,53 @@ async fn seed(server: &CortexServer) -> Vec<String> {
 
 /// Write a minimal active-memory snapshot that boosts the PyRosetta
 /// learnings (which are clustered) and ignores the plugin-schema entries.
+/// Hashes of every block currently in the ledger at `ledger_dir`.
+pub fn current_block_hashes(ledger_dir: &Path) -> Vec<String> {
+    cortex_core::Ledger::open(ledger_dir)
+        .unwrap()
+        .read_index()
+        .unwrap()
+        .blocks
+        .into_iter()
+        .map(|b| b.hash)
+        .collect()
+}
+
+/// The graph node id cortex-dream uses for a learning: its content hash. The
+/// snapshot's node ids must match what BM25 keys on, or every score is zero.
+pub fn node_id(ledger_dir: &Path, learning_id: &str) -> NodeId {
+    let r = cortex_core::Ledger::open(ledger_dir)
+        .unwrap()
+        .read_reinforcements()
+        .unwrap();
+    NodeId(r.learnings[learning_id].content_hash.clone())
+}
+
 fn seed_active_memory(state_dir: &Path, ids: &[String]) {
     let am = ActiveMemory {
         snapshot_id: "test".into(),
         timestamp: "2026-05-08T00-00-00.000000Z".into(),
-        source_block_hashes: vec![],
+        // Covers the current index head, so search may use the snapshot.
+        source_block_hashes: current_block_hashes(state_dir),
         eigenmode_count: 1,
         eigenvalues: vec![1.0],
         // Three PyRosetta entries with high projection_weight, two
         // unrelated entries omitted from active memory.
         entries: vec![
             ActiveEntry {
-                node: NodeId(format!("node-{}", &ids[1][..8])),
+                node: node_id(state_dir, &ids[1]),
                 learning_id: ids[1].clone(),
                 projection_weight: 0.9,
                 mode_projections: vec![0.9],
             },
             ActiveEntry {
-                node: NodeId(format!("node-{}", &ids[2][..8])),
+                node: node_id(state_dir, &ids[2]),
                 learning_id: ids[2].clone(),
                 projection_weight: 0.8,
                 mode_projections: vec![0.8],
             },
             ActiveEntry {
-                node: NodeId(format!("node-{}", &ids[4][..8])),
+                node: node_id(state_dir, &ids[4]),
                 learning_id: ids[4].clone(),
                 projection_weight: 0.4,
                 mode_projections: vec![0.4],

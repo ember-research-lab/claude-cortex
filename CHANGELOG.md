@@ -15,6 +15,33 @@ All notable changes to claude-cortex are documented here. Format follows [Keep a
 - **Consolidation fabric** (`scripts/`) — cross-surface chat consolidation, done *safely*. A producer extracts durable items from the claude.ai chat corpus, an **independent** pass provenance-verifies each against the source (catches overstatement/contradiction of the quote), a contradiction gate + topic-adjacent neighbor annotation flag conflicts, and survivors land in a **review queue** a human drains — **nothing is tagged autonomously** (contradiction detection is recall-limited, so the commit stays human-in-loop). Runs on the Claude **subscription**, not the metered API. Pieces: `consolidate_run.py`, `cortex_review.py`, `cortex_client.py` (reliable direct-MCP write path that sidesteps the headless plugin-MCP race), `ledger_count.py`, `chat-consolidate.sh` + systemd timers. See [`scripts/README.md`](scripts/README.md).
 - **Chat-export automation** (`scripts/export-automation/`) — fully-automatic claude.ai data-export **request + download** via standalone Playwright (headed to pass Cloudflare, `sessionKey`-cookie auth) + Gmail-IMAP retrieval; a new export zip → `ember-chat-search index` + `semantic-index` → consolidation producer. Proven end-to-end. [`SETUP.md`](scripts/export-automation/SETUP.md) documents setup + 9 verified gotchas (Cloudflare-needs-headed, SPA `networkidle`, WSLg, Gmail-not-in-headless-`claude -p`, cookie expiry, async export, no in-app download, fnm-node-under-systemd, per-export token).
 
+## [0.6.0] — 2026-10-04
+
+**Pause and trim.** The binding constraint is the top model's usage limit; cortex's hooks, skills and agents cost or conflicted more than they delivered. The ledger is frozen (read-only), the session machinery is removed, and cross-repo READ recall is kept correct. Writes return only after harness step 0 measures their value. Audit: `ember-review/AUDIT-2026-10-04-claude-cortex.md`.
+
+### Removed
+- **All four hooks** from `hooks/hooks.json` (SessionStart, PostToolUse, SessionEnd, PreCompact). Binaries and `bin/` shims are kept. Ends B9 (hooks failing in grok) and B8/B12 delivery.
+- **All 6 skills/commands**: `cortex-orientation`, `handoff-management`, `learning-capture`, `ledger-knowledge`, `/cortex-dream`, `/handoff`. The orientation text moved to `crates/cortex-hooks/assets/orientation.md` so `cortex-session-start` still builds.
+- **12 plugin agents.** `falsifier-spec`, `task-decomposer`, `test-writer`, `refactorer`, `knowledge-retriever`, `outcome-recorder`, `consolidator`, `chat-consolidator` are deleted; `verifier`, `code-implementer`, `research-agent`, `bug-investigator` moved to the user config `~/.claude/agents/` (sonnet-pinned, report to file, reply capped at 300 words; `verifier` calls `grok_verify`).
+- **"Feature pending" stub tools** (`get_suggestions`, `entity_search`, `entity_show`, `entity_stats`) (B3).
+
+### Added
+- **`cortex-mcp --read-only`** (and `CORTEX_READ_ONLY=1`): write tools (`tag_learning`, `record_outcome`, `record_corroboration`, `tag_handoff`) are not registered. They live in a separate router, so a future write tool cannot leak into a read-only server (B10 class guard). The plugin launches the server with `--read-only`.
+- Every read tool carries `readOnlyHint=true`.
+- `cortex-dream` now records `source_block_hashes` in the snapshot.
+
+### Fixed
+- **B1** Search used a stale spectral snapshot whenever one existed, returning frozen, unrelated hits at resonance 0. It now uses the snapshot only when it covers every block in the index; otherwise BM25 with `"snapshot_stale": true, "uncovered": N`. Legacy snapshots (no block hashes) count as stale. Zero-score hits are always dropped.
+- **B3** Application errors return `isError=true` with the JSON body kept.
+- **B4** With no `project_dir`, all read tools (`search_learnings`, `get_learning`, `get_handoff`, `list_learnings`, `ledger_stats`, `recall_context`, `get_session_summary`) search the cwd's project ledger, then global, and name which answered (`ledger`, `ledgers_searched`). `get_handoff` no longer returns the global handoff for every project.
+- A missing ledger is `isError=true` (`ledger_missing: ...` with the paths looked at) in every read tool instead of an empty success.
+- A corrupt active-memory snapshot is reported (`snapshot_error`) by search, get_learning, list_learnings and ledger_stats, and `snapshot_errors` lists the error from every ledger searched, not only the one that answered (BM25/scalar fallback is explicit, not silent).
+- `CORTEX_READ_ONLY` is parsed case-insensitively (1/true/yes/on vs 0/false/no/off); any other value is a startup error that names it, so a typo cannot leave a server writable.
+- `cortex-session-start` no longer directs consolidation: pending episodes yield only the note `cortex paused; N episodes pending, not consolidated`.
+
+### Changed
+- Workspace version 0.4.0 -> 0.6.0 (it had lagged the plugin); `plugin.json` 0.5.2 -> 0.6.0.
+
 ## [0.5.1] — 2026-07-09
 
 ### Fixed
