@@ -339,4 +339,41 @@ mod tests {
             SignatureCheck::InvalidSignature | SignatureCheck::Valid
         ));
     }
+
+    #[test]
+    fn weak_identity_key_universal_signature_is_rejected() {
+        // Negative vector (ember-crypto 0.1.1): under the identity point as public key, the
+        // signature R = identity, s = 0 passes a non-strict Ed25519 verify for EVERY message. Even
+        // when such a key is trusted, block verification must reject it, so a verifier swap can't
+        // silently loosen acceptance.
+        use crate::models::{TrustLevel, TrustedKey};
+        let dir = TempDir::new().unwrap();
+        let km = KeyManager::new(dir.path());
+        let mut weak_pk = [0u8; 32];
+        weak_pk[0] = 0x01; // compressed identity point
+        let key_id = compute_key_id(&weak_pk);
+        km.add_trusted_key(TrustedKey {
+            key_id: key_id.clone(),
+            public_key: BASE64.encode(weak_pk),
+            identity: Identity {
+                name: "mallory".to_string(),
+                machine: "test".to_string(),
+                email: None,
+            },
+            trust_level: TrustLevel::Full,
+            added_at: crate::time::UtcTime::now(),
+            vouched_by: Vec::new(),
+        })
+        .unwrap();
+        let mut universal = [0u8; 64];
+        universal[0] = 0x01; // R = identity, s = 0
+        let sig = BASE64.encode(universal);
+        for block_hash in ["deadbeef".repeat(8), "anything else".to_string()] {
+            assert_eq!(
+                km.verify_block_signature(&block_hash, &key_id, &sig)
+                    .unwrap(),
+                SignatureCheck::InvalidSignature
+            );
+        }
+    }
 }
