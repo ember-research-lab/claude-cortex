@@ -17,7 +17,7 @@ pub struct SearchLearningsArgs {
     /// Maximum number of results.
     #[serde(default = "default_search_limit")]
     pub limit: usize,
-    /// Project directory for project-specific search, or null for global.
+    /// Project directory for project-specific search, or null for the cwd project ledger, then global.
     #[serde(default)]
     pub project_dir: Option<String>,
 }
@@ -32,7 +32,7 @@ pub struct RecallContextArgs {
     /// Graph traversal depth from seed nodes (default 2).
     #[serde(default)]
     pub depth: Option<usize>,
-    /// Project directory for project-specific recall, or null for global.
+    /// Project directory for project-specific recall, or null for the cwd project ledger, then global.
     #[serde(default)]
     pub project_dir: Option<String>,
 }
@@ -55,7 +55,7 @@ pub struct GetLearningArgs {
     /// Include effective confidence with decay calculation.
     #[serde(default)]
     pub show_decay: bool,
-    /// Project directory, or null for global ledger.
+    /// Project directory, or null for the cwd project ledger, then global.
     #[serde(default)]
     pub project_dir: Option<String>,
 }
@@ -69,7 +69,7 @@ pub struct RecordOutcomeArgs {
     /// Optional context about the outcome.
     #[serde(default)]
     pub comment: Option<String>,
-    /// Project directory, or null for global ledger.
+    /// Project directory, or null for the cwd project ledger, then global.
     #[serde(default)]
     pub project_dir: Option<String>,
 }
@@ -81,7 +81,7 @@ pub struct RecordCorroborationArgs {
     /// Optional context about the re-observation.
     #[serde(default)]
     pub context: Option<String>,
-    /// Project directory, or null for global ledger.
+    /// Project directory, or null for the cwd project ledger, then global.
     #[serde(default)]
     pub project_dir: Option<String>,
 }
@@ -100,7 +100,7 @@ pub struct ListLearningsArgs {
     /// Include effective confidence with decay.
     #[serde(default)]
     pub show_decay: bool,
-    /// Project directory, or null for global ledger.
+    /// Project directory, or null for the cwd project ledger, then global.
     #[serde(default)]
     pub project_dir: Option<String>,
 }
@@ -115,7 +115,7 @@ fn default_list_limit() -> usize {
 
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
 pub struct LedgerStatsArgs {
-    /// Project directory, or null for global ledger.
+    /// Project directory, or null for the cwd project ledger, then global.
     #[serde(default)]
     pub project_dir: Option<String>,
 }
@@ -132,7 +132,7 @@ pub struct TagLearningArgs {
     /// Optional source file reference.
     #[serde(default)]
     pub source_file: Option<String>,
-    /// Project directory, or null for global ledger.
+    /// Project directory, or null for the cwd project ledger, then global.
     #[serde(default)]
     pub project_dir: Option<String>,
 }

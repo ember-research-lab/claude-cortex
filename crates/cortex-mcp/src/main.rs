@@ -23,14 +23,13 @@ struct Args {
     read_only: bool,
 }
 
-fn env_read_only() -> bool {
-    std::env::var("CORTEX_READ_ONLY").is_ok_and(|v| matches!(v.trim(), "1" | "true" | "yes"))
-}
-
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let mut server = if args.read_only || env_read_only() {
+    let env_ro =
+        cortex_mcp::server::parse_read_only_env(std::env::var("CORTEX_READ_ONLY").ok().as_deref())
+            .map_err(|e| anyhow::anyhow!(e))?;
+    let mut server = if args.read_only || env_ro {
         CortexServer::new_read_only()
     } else {
         CortexServer::new()

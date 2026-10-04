@@ -23,6 +23,22 @@ use crate::tools::{
     impls,
 };
 
+/// Parse a `CORTEX_READ_ONLY` value (fail-closed on anything unrecognised).
+/// `None`/empty and 0/false/no/off mean writable; 1/true/yes/on (any case) mean
+/// read-only; any other value is an error naming it, so a typo can never leave
+/// a server silently writable.
+pub fn parse_read_only_env(value: Option<&str>) -> Result<bool, String> {
+    let Some(raw) = value else { return Ok(false) };
+    let v = raw.trim().to_ascii_lowercase();
+    match v.as_str() {
+        "" | "0" | "false" | "no" | "off" => Ok(false),
+        "1" | "true" | "yes" | "on" => Ok(true),
+        _ => Err(format!(
+            "invalid CORTEX_READ_ONLY value {raw:?}: use 1/true/yes/on or 0/false/no/off"
+        )),
+    }
+}
+
 /// Server state shared across tool handlers.
 #[derive(Clone)]
 pub struct CortexServer {
