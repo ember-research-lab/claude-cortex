@@ -17,7 +17,7 @@ pub struct SearchLearningsArgs {
     /// Maximum number of results.
     #[serde(default = "default_search_limit")]
     pub limit: usize,
-    /// Project directory for project-specific search, or null for global.
+    /// Project directory for project-specific search, or null for the cwd project ledger, then global.
     #[serde(default)]
     pub project_dir: Option<String>,
 }
@@ -32,7 +32,7 @@ pub struct RecallContextArgs {
     /// Graph traversal depth from seed nodes (default 2).
     #[serde(default)]
     pub depth: Option<usize>,
-    /// Project directory for project-specific recall, or null for global.
+    /// Project directory for project-specific recall, or null for the cwd project ledger, then global.
     #[serde(default)]
     pub project_dir: Option<String>,
 }
@@ -55,7 +55,7 @@ pub struct GetLearningArgs {
     /// Include effective confidence with decay calculation.
     #[serde(default)]
     pub show_decay: bool,
-    /// Project directory, or null for global ledger.
+    /// Project directory, or null for the cwd project ledger, then global.
     #[serde(default)]
     pub project_dir: Option<String>,
 }
@@ -69,7 +69,7 @@ pub struct RecordOutcomeArgs {
     /// Optional context about the outcome.
     #[serde(default)]
     pub comment: Option<String>,
-    /// Project directory, or null for global ledger.
+    /// Project directory, or null for the cwd project ledger, then global.
     #[serde(default)]
     pub project_dir: Option<String>,
 }
@@ -81,7 +81,7 @@ pub struct RecordCorroborationArgs {
     /// Optional context about the re-observation.
     #[serde(default)]
     pub context: Option<String>,
-    /// Project directory, or null for global ledger.
+    /// Project directory, or null for the cwd project ledger, then global.
     #[serde(default)]
     pub project_dir: Option<String>,
 }
@@ -100,7 +100,7 @@ pub struct ListLearningsArgs {
     /// Include effective confidence with decay.
     #[serde(default)]
     pub show_decay: bool,
-    /// Project directory, or null for global ledger.
+    /// Project directory, or null for the cwd project ledger, then global.
     #[serde(default)]
     pub project_dir: Option<String>,
 }
@@ -115,7 +115,7 @@ fn default_list_limit() -> usize {
 
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
 pub struct LedgerStatsArgs {
-    /// Project directory, or null for global ledger.
+    /// Project directory, or null for the cwd project ledger, then global.
     #[serde(default)]
     pub project_dir: Option<String>,
 }
@@ -132,7 +132,7 @@ pub struct TagLearningArgs {
     /// Optional source file reference.
     #[serde(default)]
     pub source_file: Option<String>,
-    /// Project directory, or null for global ledger.
+    /// Project directory, or null for the cwd project ledger, then global.
     #[serde(default)]
     pub project_dir: Option<String>,
 }
@@ -191,58 +191,6 @@ pub struct TagHandoffArgs {
     /// would otherwise be lost.
     #[serde(default)]
     pub context_notes: String,
-    #[serde(default)]
-    pub project_dir: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct GetSuggestionsArgs {
-    #[serde(default = "default_suggestions_limit")]
-    pub limit: usize,
-    #[serde(default = "default_min_confidence_search")]
-    pub min_confidence: f64,
-    #[serde(default)]
-    pub project_dir: Option<String>,
-}
-
-fn default_suggestions_limit() -> usize {
-    5
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct EntitySearchArgs {
-    pub query: String,
-    #[serde(default)]
-    pub entity_type: Option<String>,
-    #[serde(default = "default_entity_search_limit")]
-    pub limit: usize,
-    #[serde(default)]
-    pub project_dir: Option<String>,
-}
-
-fn default_entity_search_limit() -> usize {
-    20
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct EntityShowArgs {
-    pub qualified_name: String,
-    #[serde(default)]
-    pub show_dependencies: bool,
-    #[serde(default)]
-    pub show_dependents: bool,
-    #[serde(default = "default_entity_depth")]
-    pub depth: u32,
-    #[serde(default)]
-    pub project_dir: Option<String>,
-}
-
-fn default_entity_depth() -> u32 {
-    1
-}
-
-#[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
-pub struct EntityStatsArgs {
     #[serde(default)]
     pub project_dir: Option<String>,
 }

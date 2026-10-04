@@ -1,16 +1,14 @@
 //! `cortex-session-start` — fired at the start of every Claude Code session.
 //!
 //! v0.4.0: orientation skill content is INJECTED directly via the
-//! SessionStart hook. This decouples orientation availability from the
-//! Skill-tool surfacing mechanism (which depends on plugin-loader
-//! discovery quirks and trigger-phrase matching). The cortex-orientation
-//! SKILL.md remains the single source of truth — it's embedded via
-//! `include_str!` at compile time, so the hook output and the skill
-//! body can never drift.
+//! SessionStart hook. Since v0.6.0 the plugin no longer wires this hook
+//! (cortex is paused; see CHANGELOG), and the orientation skill was removed;
+//! the text lives on as `assets/orientation.md`, embedded via `include_str!`
+//! so the binary keeps working if the hook is re-enabled.
 //!
 //! v0.5.0 (Phase 3): if pending (unconsolidated) episodes exist in the
 //! episodic store, appends a consolidation directive instructing the agent
-//! to dispatch the `consolidator` agent before other work.
+//! to consolidate them (since 0.6.0 the directive only reports that cortex is paused).
 //!
 //! Output structure (in order):
 //!   1. Cortex Orientation directives (full skill body)
@@ -32,10 +30,9 @@ const TOP_K: usize = 8;
 /// confirmation (TTL backstop).
 const TTL_DAYS: u32 = 30;
 
-/// Full cortex-orientation skill body, embedded at compile time. Single
-/// source of truth: edit `skills/cortex-orientation/SKILL.md` and the
-/// hook picks up the change on next rebuild.
-const ORIENTATION_SKILL: &str = include_str!("../../../../skills/cortex-orientation/SKILL.md");
+/// Orientation text, embedded at compile time from `assets/orientation.md`
+/// (formerly the cortex-orientation skill).
+const ORIENTATION_SKILL: &str = include_str!("../../assets/orientation.md");
 
 fn main() {
     let input = read_input();
@@ -124,56 +121,16 @@ fn build_context(
     sections.join("\n\n")
 }
 
-/// Returns a consolidation directive string if there are pending episodes,
-/// or `None` when there are no pending episodes (zero-pending clean no-op).
-fn consolidation_directive(state_root: &Path, source: &str) -> Option<String> {
+/// Returns a neutral status note when episodes are pending, or `None` when none
+/// are. Since 0.6.0 this is NOT a directive: cortex is paused and nothing
+/// consolidates episodes, so the note only reports the count.
+fn consolidation_directive(state_root: &Path, _source: &str) -> Option<String> {
     if !has_pending_episodes(state_root) {
         return None;
     }
-    let ids = pending_episode_ids(state_root);
-    // Cap the listing: 115 pending IDs were being injected into every session
-    // start (~5 KB of UUIDs the model cannot act on). The consolidator reads
-    // the pending set itself; the session only needs to know it is non-empty.
-    const MAX_LISTED: usize = 8;
-    let ids_list = if ids.is_empty() {
-        String::from("(no episode IDs available)")
-    } else {
-        let mut list = ids
-            .iter()
-            .take(MAX_LISTED)
-            .map(|id| format!("  - {id}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        if ids.len() > MAX_LISTED {
-            list.push_str(&format!(
-                "\n  - … and {} more ({} pending in total; the consolidator enumerates them)",
-                ids.len() - MAX_LISTED,
-                ids.len()
-            ));
-        }
-        list
-    };
-
-    let header = match source {
-        "compact" | "clear" => {
-            "# Consolidation Required (context lost)\n\n\
-             Context was lost (compaction/clear). Pending episodes were captured — \
-             consolidate them before other work:"
-        }
-        _ => {
-            "# Consolidation Bench\n\n\
-             Consolidation bench: tidy any pending episodes below:"
-        }
-    };
-
+    let n = pending_episode_ids(state_root).len();
     Some(format!(
-        "{header}\n\n\
-         {ids_list}\n\n\
-         Dispatch the `consolidator` agent over these episode IDs to promote \
-         surviving learnings into the long-term ledger.\n\n\
-         After the consolidator has finished promoting learnings via tag_learning, \
-         run `/cortex-dream` to regenerate active memory so the new learnings are \
-         reflected immediately."
+        "cortex paused; {n} episodes pending, not consolidated"
     ))
 }
 
@@ -266,117 +223,44 @@ mod tests {
         (tmp, episode_id)
     }
 
+    const NOTE: &str = "cortex paused; 1 episodes pending, not consolidated";
+
+    /// The pending-episode note must be a bare status line, never an instruction.
+    fn assert_neutral(context: &str) {
+        let lines: Vec<&str> = context
+            .lines()
+            .filter(|l| l.contains("episodes pending"))
+            .collect();
+        assert_eq!(lines, vec![NOTE], "got:\n{context}");
+        // The note is the whole pending-episodes section: exact match above rules
+        // out any imperative (consolidate/tidy/dispatch/run), and no old header may
+        // remain. (The orientation text elsewhere is out of scope.)
+        assert!(
+            !context.lines().any(|l| l.starts_with("# Consolidation")),
+            "old consolidation header present; got:\n{context}"
+        );
+    }
+
     #[test]
-    fn consolidation_directive_on_pending_episodes_compact_source() {
-        let (tmp, episode_id) = seed_manifest_with_episode(EpisodeStatus::Unconsolidated);
+    fn pending_episodes_give_neutral_note_for_every_source() {
+        for source in ["compact", "clear", "startup", "resume"] {
+            let (tmp, _id) = seed_manifest_with_episode(EpisodeStatus::Unconsolidated);
+            let context = build_context(&[], Some(tmp.path()), source);
+            assert_neutral(&context);
+        }
+    }
+
+    #[test]
+    fn no_note_on_zero_pending_episodes() {
+        let (tmp, _id) = seed_manifest_with_episode(EpisodeStatus::Evictable);
         let context = build_context(&[], Some(tmp.path()), "compact");
-
-        assert!(
-            context.contains("context lost"),
-            "should contain 'context lost' for source=compact; got:\n{context}"
-        );
-        assert!(
-            context.contains("compaction/clear"),
-            "should describe context-lost scenario"
-        );
-        assert!(
-            context.contains(&episode_id),
-            "should include the pending episode id; got:\n{context}"
-        );
-        assert!(
-            context.contains("consolidator"),
-            "should mention the consolidator agent"
-        );
+        assert!(!context.contains("episodes pending"), "got:\n{context}");
     }
 
     #[test]
-    fn consolidation_directive_on_pending_episodes_startup_source() {
-        let (tmp, episode_id) = seed_manifest_with_episode(EpisodeStatus::Unconsolidated);
-        let context = build_context(&[], Some(tmp.path()), "startup");
-
-        assert!(
-            context.contains("Consolidation Bench") || context.contains("tidy any pending"),
-            "should contain bench/tidy wording for source=startup; got:\n{context}"
-        );
-        assert!(
-            context.contains(&episode_id),
-            "should include the pending episode id; got:\n{context}"
-        );
-        assert!(
-            context.contains("consolidator"),
-            "should mention the consolidator agent"
-        );
-    }
-
-    #[test]
-    fn no_directive_on_zero_pending_episodes() {
-        let (tmp, _episode_id) = seed_manifest_with_episode(EpisodeStatus::Evictable);
-        let context = build_context(&[], Some(tmp.path()), "compact");
-
-        assert!(
-            !context.contains("consolidator"),
-            "no consolidation directive when all episodes are Evictable; got:\n{context}"
-        );
-        assert!(
-            !context.contains("Consolidation"),
-            "no consolidation section when zero pending; got:\n{context}"
-        );
-    }
-
-    #[test]
-    fn no_directive_when_no_manifest() {
+    fn no_note_when_no_manifest() {
         let tmp = TempDir::new().unwrap();
-        // No episodic dir or manifest at all.
         let context = build_context(&[], Some(tmp.path()), "compact");
-
-        assert!(
-            !context.contains("consolidator"),
-            "no consolidation directive when no manifest exists; got:\n{context}"
-        );
-        assert!(
-            !context.contains("Consolidation"),
-            "no consolidation section when no manifest; got:\n{context}"
-        );
-    }
-
-    #[test]
-    fn session_start_includes_dream_directive_after_consolidation() {
-        let (tmp, episode_id) = seed_manifest_with_episode(EpisodeStatus::Unconsolidated);
-        let context = build_context(&[], Some(tmp.path()), "compact");
-
-        // Must contain the consolidation directive.
-        assert!(
-            context.contains("consolidator"),
-            "should mention the consolidator agent; got:\n{context}"
-        );
-        assert!(
-            context.contains(&episode_id),
-            "should include the pending episode id; got:\n{context}"
-        );
-
-        // Must also contain the dream re-index directive.
-        assert!(
-            context.contains("cortex-dream"),
-            "should contain cortex-dream re-index directive; got:\n{context}"
-        );
-        assert!(
-            context.contains("regenerate active memory"),
-            "should explain why cortex-dream is invoked; got:\n{context}"
-        );
-    }
-
-    #[test]
-    fn no_dream_directive_on_zero_pending_episodes() {
-        let (tmp, _episode_id) = seed_manifest_with_episode(EpisodeStatus::Evictable);
-        let context = build_context(&[], Some(tmp.path()), "compact");
-
-        assert!(
-            !context.contains("cortex-dream"),
-            "no cortex-dream directive when all episodes are non-pending; got:\n{context}"
-        );
-        assert!(
-            !context.contains("consolidator"),
-            "no consolidation directive when zero pending; got:\n{context}"
-        );
+        assert!(!context.contains("episodes pending"), "got:\n{context}");
     }
 }
