@@ -118,18 +118,30 @@ fn across(
 ) -> anyhow::Result<Value> {
     let searched = labels(candidates);
     let mut first: Option<Value> = None;
+    // Snapshot errors from EVERY ledger searched, not only the one that answered.
+    let mut snapshot_errors: Vec<Value> = Vec::new();
     for (label, path) in candidates {
         let mut result = one(path)?;
         result["ledger"] = json!(label);
         result["ledgers_searched"] = json!(searched);
+        if let Some(reason) = result.get("snapshot_error").and_then(Value::as_str) {
+            snapshot_errors.push(json!({"ledger": label, "reason": reason}));
+        }
         if answered(&result) {
-            return Ok(result);
+            return Ok(with_snapshot_errors(result, snapshot_errors));
         }
         first.get_or_insert(result);
     }
     let mut none = first.expect("read_candidates never returns empty");
     none["ledger"] = Value::Null;
-    Ok(none)
+    Ok(with_snapshot_errors(none, snapshot_errors))
+}
+
+fn with_snapshot_errors(mut v: Value, errors: Vec<Value>) -> Value {
+    if !errors.is_empty() {
+        v["snapshot_errors"] = Value::Array(errors);
+    }
+    v
 }
 
 fn labels(candidates: &[(&'static str, PathBuf)]) -> Vec<&'static str> {
@@ -210,9 +222,16 @@ fn confidence_with_spectral(
 /// Resolve the active-memory snapshot for a given ledger path, if one
 /// exists. State directory is `<ledger>/cortex-state/` (matches what
 /// cortex-dream writes).
-fn load_active_memory(ledger_path: &std::path::Path) -> Option<cortex_active_memory::ActiveMemory> {
-    let state = ledger_path.join("cortex-state");
-    cortex_active_memory::read_current(&state).ok().flatten()
+fn snapshot_state(
+    ledger_path: &std::path::Path,
+) -> (Option<cortex_active_memory::ActiveMemory>, Option<String>) {
+    match cortex_active_memory::read_current(&ledger_path.join("cortex-state")) {
+        Ok(a) => (a, None),
+        Err(e) => (
+            None,
+            Some(format!("unreadable active-memory snapshot: {e}")),
+        ),
+    }
 }
 
 fn shortid(id: &str) -> String {
@@ -354,11 +373,7 @@ fn search_one(
 ) -> anyhow::Result<Value> {
     let ledger = Ledger::open(path)?;
     // A corrupt/unreadable snapshot is reported (`snapshot_error`), not swallowed.
-    let (active, snapshot_error) =
-        match cortex_active_memory::read_current(&path.join("cortex-state")) {
-            Ok(a) => (a, None),
-            Err(e) => (None, Some(e.to_string())),
-        };
+    let (active, snapshot_error) = snapshot_state(path);
     let reinforcements = ledger.read_reinforcements()?;
     let has_query = !args.query.trim().is_empty();
 
@@ -483,7 +498,11 @@ fn search_one(
 pub async fn get_learning(server: &CortexServer, args: GetLearningArgs) -> anyhow::Result<Value> {
     let candidates = read_candidates(server, args.project_dir.as_deref())?;
     let mut found = None;
+    let mut snapshot_errors: Vec<Value> = Vec::new();
     for (label, path) in &candidates {
+        if let (_, Some(reason)) = snapshot_state(path) {
+            snapshot_errors.push(json!({"ledger": label, "reason": reason}));
+        }
         let ledger = Ledger::open(path)?;
         let reinforcements = ledger.read_reinforcements()?;
         if match_prefix(&reinforcements, &args.learning_id).is_some() {
@@ -492,16 +511,19 @@ pub async fn get_learning(server: &CortexServer, args: GetLearningArgs) -> anyho
         }
     }
     let Some((label, path, ledger, reinforcements)) = found else {
-        return Ok(json!({
-            "error": format!(
-                "Learning '{}' not found (ledgers searched: {})",
-                args.learning_id,
-                labels(&candidates).join(", ")
-            ),
-            "ledgers_searched": labels(&candidates),
-        }));
+        return Ok(with_snapshot_errors(
+            json!({
+                "error": format!(
+                    "Learning '{}' not found (ledgers searched: {})",
+                    args.learning_id,
+                    labels(&candidates).join(", ")
+                ),
+                "ledgers_searched": labels(&candidates),
+            }),
+            snapshot_errors,
+        ));
     };
-    let active = load_active_memory(&path);
+    let (active, _) = snapshot_state(&path);
     let (id, reinforcement) =
         match_prefix(&reinforcements, &args.learning_id).expect("matched above");
     let block = block_for_reinforcement(&ledger, reinforcement);
@@ -563,7 +585,7 @@ pub async fn get_learning(server: &CortexServer, args: GetLearningArgs) -> anyho
             .collect();
         result.insert("outcomes".into(), Value::Array(outcomes));
     }
-    Ok(Value::Object(result))
+    Ok(with_snapshot_errors(Value::Object(result), snapshot_errors))
 }
 
 pub async fn record_outcome(
@@ -638,7 +660,7 @@ fn list_one(
     args: &ListLearningsArgs,
     category_filter: Option<LearningCategory>,
 ) -> anyhow::Result<Value> {
-    let active = load_active_memory(path);
+    let (active, snapshot_error) = snapshot_state(path);
     let reinforcements = Ledger::open(path)?.read_reinforcements()?;
     let mut entries: Vec<(String, Reinforcement, f64)> = reinforcements
         .learnings
@@ -683,11 +705,15 @@ fn list_one(
             entry
         })
         .collect();
-    Ok(json!({
+    let mut out = json!({
         "learnings": results,
         "total": results.len(),
         "mode": mode,
-    }))
+    });
+    if let Some(reason) = snapshot_error {
+        out["snapshot_error"] = json!(reason);
+    }
+    Ok(out)
 }
 
 pub async fn ledger_stats(server: &CortexServer, args: LedgerStatsArgs) -> anyhow::Result<Value> {
@@ -698,7 +724,7 @@ pub async fn ledger_stats(server: &CortexServer, args: LedgerStatsArgs) -> anyho
 
 fn ledger_stats_one(path: &std::path::Path) -> anyhow::Result<Value> {
     let ledger = Ledger::open(path)?;
-    let active = load_active_memory(path);
+    let (active, snapshot_error) = snapshot_state(path);
     let reinforcements = ledger.read_reinforcements()?;
     let mut by_category: Map<String, Value> = Map::new();
     let mut high = 0u64;
@@ -725,14 +751,18 @@ fn ledger_stats_one(path: &std::path::Path) -> anyhow::Result<Value> {
     } else {
         "scalar"
     };
-    Ok(json!({
+    let mut out = json!({
         "exists": true,
         "path": path,
         "total_learnings": total,
         "by_category": Value::Object(by_category),
         "by_confidence": { "high": high, "medium": medium, "low": low },
         "confidence_mode": mode,
-    }))
+    });
+    if let Some(reason) = snapshot_error {
+        out["snapshot_error"] = json!(reason);
+    }
+    Ok(out)
 }
 
 pub async fn tag_learning(server: &CortexServer, args: TagLearningArgs) -> anyhow::Result<Value> {
