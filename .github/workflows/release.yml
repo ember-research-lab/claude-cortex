@@ -15,6 +15,7 @@ jobs:
   version-guard:
     name: version-guard
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Assert plugin.json version matches the tag
@@ -32,6 +33,7 @@ jobs:
     name: build (${{ matrix.target }})
     needs: version-guard
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -113,6 +115,7 @@ jobs:
     name: release
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
