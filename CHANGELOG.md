@@ -5,6 +5,7 @@ All notable changes to claude-cortex are documented here. Format follows [Keep a
 ## [Unreleased]
 
 ### Changed
+- CI: every job has `timeout-minutes` (whale-signal#258).
 - **post_tool_use nudge dedup is per-kind, session-scale** (v0.5.2): the
   Discovery-Tagging/Outcome-Capture nudges now fire once per session per nudge
   kind (web / external-mcp / agent / recall; 4h window) instead of per tool
