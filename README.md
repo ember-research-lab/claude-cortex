@@ -8,11 +8,11 @@ Status: maintenance mode (0.6.0); read-only recall, no new features planned.
 
 cortex is a Claude Code plugin providing memory, learning, and continuous-improvement infrastructure. Learnings are recorded in a blockchain-style ledger with hash-chained, Ed25519-signed blocks and SHA-256 content-addressed storage. Confidence updates with Success / Partial / Failure outcomes and decays on a 180-day half-life so old guidance fades unless reinforced.
 
-This is **v4** — a spectral-retrieval and handoff-substrate layer on top of the v3 Rust workspace. The on-disk substrate format is preserved exactly across both versions, so existing v2 ledgers continue to work.
+This is version **0.6.0** (the v4 design generation) — a spectral-retrieval and handoff-substrate layer on top of the v3 Rust workspace. The on-disk substrate format is preserved exactly across both versions, so existing v2 ledgers continue to work.
 
 ## Status
 
-cortex lives at `ember-research-lab/claude-cortex` (this repo). v2 (Python) remains at `ember-lab-admin/claude-cortex` for legacy installs; existing v2 ledgers convert via `cortex-migrate`.
+cortex lives at `ember-research-lab/claude-cortex` (this repo). The earlier v2 (Python) line is superseded; existing v2 ledgers convert via `cortex-migrate`.
 
 | Phase | Scope | Status |
 |------|------|------|
@@ -86,10 +86,10 @@ Hook subprocess cold-start budget is **under 100 ms**; MCP server response budge
 
 ## Install
 
-Install from the Ember marketplace:
+This repository is also a Claude Code plugin marketplace (`.claude-plugin/marketplace.json`), so it installs from the public repo alone:
 
 ```sh
-/plugin marketplace add ember-research-lab/marketplace
+/plugin marketplace add ember-research-lab/claude-cortex
 /plugin install claude-cortex@ember-research-lab
 ```
 
@@ -162,7 +162,7 @@ Then **restart Claude Code** so existing sessions pick up the new binaries. Symp
 
 Existing v2 users:
 
-1. `/plugin uninstall claude-cortex@ember-lab-admin` (Python v2)
+1. `/plugin uninstall claude-cortex` (the Python v2 plugin)
 2. `/plugin install claude-cortex@ember-research-lab` (Rust v3)
 3. **Run `cortex-migrate` against your ledger** — see below. This is a real conversion, not a no-op.
 4. **Restart Claude Code** so the new MCP server reads the migrated ledger.
