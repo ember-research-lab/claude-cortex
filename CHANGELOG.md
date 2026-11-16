@@ -5,6 +5,7 @@ All notable changes to claude-cortex are documented here. Format follows [Keep a
 ## [Unreleased]
 
 ### Changed
+- docs(readme): describe what the 0.6.0 plugin ships (one read-only MCP server; no hooks, skills, agents or commands), mark the hook binaries as not wired, list all crates.
 - CI: every job has `timeout-minutes` (whale-signal#258).
 - **post_tool_use nudge dedup is per-kind, session-scale** (v0.5.2): the
   Discovery-Tagging/Outcome-Capture nudges now fire once per session per nudge

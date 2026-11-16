@@ -5,8 +5,9 @@ Retrieval is BM25 (`cortex-similarity`, no embedding model or API) plus spectral
 Seven read tools: `search_learnings`, `recall_context`, `get_learning`, `list_learnings`, `ledger_stats`, `get_session_summary`, `get_handoff`.
 Install: from a checkout, `bash install.sh` (Rust >= 1.85; builds release binaries to `~/.local/bin`); see [Install](#install) for the plugin route.
 Status: maintenance mode (0.6.0); read-only recall, no new features planned.
+What the published plugin ships: `plugin.json` registers one MCP server (`cortex-mcp --read-only`) and nothing else. It registers no hooks, skills, agents or commands. The hook binaries and `bin/` shims are in the repo but are not enabled in the plugin (`hooks/hooks.json` is empty).
 
-cortex is a Claude Code plugin providing memory, learning, and continuous-improvement infrastructure. Learnings are recorded in a blockchain-style ledger with hash-chained, Ed25519-signed blocks and SHA-256 content-addressed storage. Confidence updates with Success / Partial / Failure outcomes and decays on a 180-day half-life so old guidance fades unless reinforced.
+The ledger is a blockchain-style chain of blocks: SHA-256 content hashes (`cortex-core/src/hashing.rs`), a Merkle tree over block hashes (`merkle.rs`), and Ed25519 block signatures (`signing.rs`, routed through the `ember-crypto` crate). Write tools (`tag_learning`, `record_outcome`, `record_corroboration`, `tag_handoff`) exist in the server but are not registered under `--read-only`, which is how the plugin launches it. Confidence decays on a 180-day half-life.
 
 This is version **0.6.0** (the v4 design generation) — a spectral-retrieval and handoff-substrate layer on top of the v3 Rust workspace. The on-disk substrate format is preserved exactly across both versions, so existing v2 ledgers continue to work.
 
@@ -19,8 +20,8 @@ cortex lives at `ember-research-lab/claude-cortex` (this repo). The earlier v2 (
 | v3.1 | Cargo workspace + plugin.json + CI | done |
 | v3.2 | `cortex-core` substrate (ledger, hash chain, signatures, Merkle, content store, v2 compat) | done |
 | v3.3 | `cortex-mcp` (rmcp 0.16, ledger-grounded + handoff + `recall_context` + `record_corroboration`; entity-graph stubs removed in 0.6.0) | done |
-| v3.4 | `cortex-hooks` (session_start / post_tool_use / session_end binaries) | done |
-| v3.5 | Skills, agents, commands (markdown) — orientation injects at SessionStart | done |
+| v3.4 | `cortex-hooks` (session_start / post_tool_use / session_end binaries) | done (binaries kept; not wired since 0.6.0) |
+| v3.5 | Skills, agents, commands (markdown) | removed in 0.6.0 |
 | v3.6 | `cortex-migrate` (v2 → v3 validation + transcription) | done |
 | v4.1 | `cortex-similarity` (BM25, no embedding model / no API) | done |
 | v4.2 | `cortex-spectral` (graph + Laplacian + eigendecomposition) | done |
@@ -33,7 +34,7 @@ cortex lives at `ember-research-lab/claude-cortex` (this repo). The earlier v2 (
 | 0.6.0 | **Pause**: hooks, skills, agents removed; `cortex-mcp --read-only`; read-path fixes B1/B3/B4 | done |
 | fabric | Cross-surface consolidation (`scripts/`): producer → verify → contradiction-gate → review queue; chat-export automation | done |
 
-**Performance:** hook cold start 3-5 ms (budget: 100 ms). MCP server startup-to-`tools/list` 10-14 ms (budget: 50 ms). cortex-dream pipeline under 60 s for ledgers <10 k entries.
+**Performance (measured before the 0.6.0 pause; hooks are no longer wired):** hook cold start 3-5 ms (budget: 100 ms). MCP server startup-to-`tools/list` 10-14 ms (budget: 50 ms). cortex-dream pipeline under 60 s for ledgers <10 k entries.
 
 ## Workspace layout
 
@@ -46,17 +47,21 @@ claude-cortex/
 ├── crates/
 │   ├── cortex-core/          # Substrate: ledger, hash chain, signing, content store
 │   ├── cortex-mcp/           # MCP server (rmcp stdio transport)
-│   ├── cortex-hooks/         # session_start, post_tool_use, session_end binaries
+│   ├── cortex-hooks/         # session_start, post_tool_use, session_end, pre_compact binaries (not wired)
 │   ├── cortex-migrate/       # v2 → v3 ledger validation / import
 │   ├── cortex-similarity/    # v4 BM25 lexical similarity
 │   ├── cortex-spectral/      # v4 graph + Laplacian + eigendecomposition
 │   ├── cortex-active-memory/ # v4 top-k snapshots with mode projections
 │   ├── cortex-monitor/       # v4 spectrum history + trajectory classifier
 │   ├── cortex-dream/         # v4 dreaming pipeline orchestrator
-│   └── cortex-handoff/       # v4 work-in-progress state substrate
+│   ├── cortex-handoff/       # v4 work-in-progress state substrate
+│   ├── cortex-audit/         # signed, hash-chained action-audit ledger
+│   ├── cortex-confidence/    # decaying per-behavior confidence
+│   ├── cortex-episodic/      # episodic memory substrate
+│   └── cortex-graph/         # learnings projected into an ember-graph knowledge graph
 ├── bin/                      # shims for the hook binaries (unused while paused)
 ├── hooks/hooks.json          # empty while paused (no hooks wired)
-├── tests/                    # Workspace integration tests + v2 fixtures
+├── tests/fixtures/           # v2 ledger fixtures (crate tests live under crates/*/tests)
 └── .github/workflows/        # CI + release pipelines
 ```
 
@@ -93,7 +98,7 @@ This repository is also a Claude Code plugin marketplace (`.claude-plugin/market
 /plugin install claude-cortex@ember-research-lab
 ```
 
-The plugin install fetches the markdown (agents, skills, hooks/hooks.json) and `plugin.json`, plus the `bin/` shims that keep the hooks from hard-failing. It does **not** build the Rust binaries the hooks and MCP server actually run — those need to be on PATH. Until you build them, `cortex-session-start` prints an install reminder and the other hooks no-op; nothing crashes.
+The plugin install fetches `plugin.json`, `.mcp.json`, the empty `hooks/hooks.json` and the `bin/` shims (the shims only run if a hook is re-enabled). It does **not** build the Rust binary the MCP server runs: `cortex-mcp` must be on PATH. Until it is, the `cortex` MCP server fails to start in Claude Code.
 
 **Run the installer once (Rust ≥ 1.85):**
 ```sh
@@ -105,7 +110,7 @@ bash "$CLAUDE_PLUGIN_ROOT/install.sh"   # builds release binaries -> ~/.local/bi
 Alternatives if you prefer to manage binaries yourself:
 
 ```sh
-# From a release artifact:
+# From a release artifact (note: the latest GitHub release, v0.5.1, predates the 0.6.0 pause; build from source for 0.6.0):
 tar -xzf claude-cortex-x86_64-unknown-linux-gnu.tar.gz
 cp claude-cortex-*/cortex-* ~/.local/bin/   # or anywhere on PATH
 
@@ -118,14 +123,14 @@ cargo install --path crates/cortex-migrate --bins
 After install, verify:
 ```sh
 cortex-mcp --version
-which cortex-session-start cortex-post-tool-use cortex-session-end cortex-migrate
+which cortex-mcp cortex-migrate
 ```
 
 ## Upgrading
 
 Upgrading is two steps: refresh the plugin, then refresh the binaries.
 
-**Step 1 — refresh the plugin (markdown / hooks.json / plugin.json / `bin/` shims):**
+**Step 1 — refresh the plugin (`plugin.json` / `.mcp.json` / `hooks/hooks.json` / `bin/` shims):**
 ```
 /plugin marketplace update ember-research-lab
 /plugin update claude-cortex@ember-research-lab
@@ -156,7 +161,7 @@ cargo install --path crates/cortex-hooks --bins
 cargo install --path crates/cortex-migrate --bins
 ```
 
-Then **restart Claude Code** so existing sessions pick up the new binaries. Symptom of forgetting this step: source-side features (e.g. new skill content, updated hook directives) appear to work, but functionality that lives in the binary (e.g. SessionStart auto-injection, new MCP tools) is silently absent.
+Then **restart Claude Code** so existing sessions pick up the new binaries. Symptom of forgetting this step: the plugin metadata is current, but functionality that lives in the binary (e.g. new MCP tools) is absent.
 
 ## Migration from v2
 
