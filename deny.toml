@@ -13,6 +13,12 @@ ignore = [
     # affected." Patched in rmcp 1.4.0 — a major upgrade from 0.16 (full server
     # rewrite) tracked separately; not applicable to our attack surface.
     { id = "RUSTSEC-2026-0189", reason = "rmcp DNS-rebinding is HTTP-transport only; cortex-mcp is stdio-only (unaffected per advisory). Fix is rmcp 1.4.0, a major migration tracked separately." },
+    # rmcp unbounded response buffering (GHSA-c9f9-cp8h-jcj5) affects ONLY the built-in
+    # Streamable HTTP *clients* (features `transport-streamable-http-client-reqwest` and
+    # `transport-streamable-http-client-unix-socket`). cortex-mcp enables `server` +
+    # `transport-io` only, so that code is not compiled (no reqwest in Cargo.lock).
+    # Patched in rmcp 3.9.0, the same major upgrade from 0.16 tracked for the entry above.
+    { id = "RUSTSEC-2026-0462", reason = "rmcp HTTP-client buffering; cortex-mcp is a stdio-only server and compiles no HTTP client (unaffected). Fix is rmcp 3.9.0, a major upgrade" },
 ]
 
 [bans]
