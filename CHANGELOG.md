@@ -5,9 +5,10 @@ All notable changes to claude-cortex are documented here. Format follows [Keep a
 ## [Unreleased]
 
 ### Changed
+- chore(repo): public cleanup — removed the chat-export automation scripts and units, `.claude/settings.json`, and mentions of private projects and paths.
 - chore: untrack `scripts/__pycache__/*.pyc` and gitignore `__pycache__/` and `*.pyc`.
 - docs(readme): describe what the 0.6.0 plugin ships (one read-only MCP server; no hooks, skills, agents or commands), mark the hook binaries as not wired, list all crates.
-- CI: every job has `timeout-minutes` (whale-signal#258).
+- CI: every job has `timeout-minutes`.
 - **post_tool_use nudge dedup is per-kind, session-scale** (v0.5.2): the
   Discovery-Tagging/Outcome-Capture nudges now fire once per session per nudge
   kind (web / external-mcp / agent / recall; 4h window) instead of per tool
@@ -16,11 +17,11 @@ All notable changes to claude-cortex are documented here. Format follows [Keep a
 
 ### Added
 - **Consolidation fabric** (`scripts/`) — cross-surface chat consolidation, done *safely*. A producer extracts durable items from the claude.ai chat corpus, an **independent** pass provenance-verifies each against the source (catches overstatement/contradiction of the quote), a contradiction gate + topic-adjacent neighbor annotation flag conflicts, and survivors land in a **review queue** a human drains — **nothing is tagged autonomously** (contradiction detection is recall-limited, so the commit stays human-in-loop). Runs on the Claude **subscription**, not the metered API. Pieces: `consolidate_run.py`, `cortex_review.py`, `cortex_client.py` (reliable direct-MCP write path that sidesteps the headless plugin-MCP race), `ledger_count.py`, `chat-consolidate.sh` + systemd timers. See [`scripts/README.md`](scripts/README.md).
-- **Chat-export automation** (`scripts/export-automation/`) — fully-automatic claude.ai data-export **request + download** via standalone Playwright (headed to pass Cloudflare, `sessionKey`-cookie auth) + Gmail-IMAP retrieval; a new export zip → `ember-chat-search index` + `semantic-index` → consolidation producer. Proven end-to-end. [`SETUP.md`](scripts/export-automation/SETUP.md) documents setup + 9 verified gotchas (Cloudflare-needs-headed, SPA `networkidle`, WSLg, Gmail-not-in-headless-`claude -p`, cookie expiry, async export, no in-app download, fnm-node-under-systemd, per-export token).
+- **Chat-export automation** — an automated claude.ai export request and download; since removed from the repo (a new export zip is still ingested by `scripts/refresh-corpus.sh`).
 
 ## [0.6.0] — 2026-10-04
 
-**Pause and trim.** The binding constraint is the top model's usage limit; cortex's hooks, skills and agents cost or conflicted more than they delivered. The ledger is frozen (read-only), the session machinery is removed, and cross-repo READ recall is kept correct. Writes return only after harness step 0 measures their value. Audit: `ember-review/AUDIT-2026-10-04-claude-cortex.md`.
+**Pause and trim.** Cortex's hooks, skills and agents cost or conflicted more than they delivered. The ledger is frozen (read-only), the session machinery is removed, and cross-repo READ recall is kept correct. Writes return only after harness step 0 measures their value.
 
 ### Removed
 - **All four hooks** from `hooks/hooks.json` (SessionStart, PostToolUse, SessionEnd, PreCompact). Binaries and `bin/` shims are kept. Ends B9 (hooks failing in grok) and B8/B12 delivery.

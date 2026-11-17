@@ -39,7 +39,7 @@ Query *"what do I know about module X"* traverses **both** families in one hop �
 structure + every insight/outcome attached to it. `ember-graph`'s schemaless typed nodes
 (`kind: String`, `source: Option<String>`) and content-addressed `NodeId::canonical(ns,
 entity)` already support this; namespacing keeps collision domains clean
-(`code::whale-signal::store.rs` vs `learning::ddad7500`).
+(`code::other-project::store.rs` vs `learning::ddad7500`).
 
 ## 3. Confidence model
 
@@ -140,7 +140,7 @@ Both graphs are two-tiered, mirroring the existing ledger split (`resolve_ledger
 - **Local** (`<project>/.claude/cortex/…`) — this repo's code graph + project-specific
   insights. Loaded when working there.
 - **Global** (`~/.claude/cortex/…`) — cross-project knowledge + a lightweight **portfolio
-  map** (cross-repo edges no local graph can hold: whale-signal-core → mobile/desktop/model
+  map** (cross-repo edges no local graph can hold: core crate → mobile/desktop/model
   via UniFFI; shared crates; ember-graph↔cortex).
 
 - **Merged scoped query view**: in project P, query `P-local ∪ relevant-global`; never pull
@@ -162,7 +162,7 @@ Both graphs are two-tiered, mirroring the existing ledger split (`resolve_ledger
 - **Confidence applies**: parsed `calls` edge = `Extracted` (commit-superseded); inferred
   "these modules form a subsystem" = `Inferred`.
 - **Dogfood order**: cortex + ember-graph themselves first (small, in-hand, we map the tool
-  with the tool); whale-signal second (biggest token-pain, real payoff).
+  with the tool); another project second (biggest token-pain, real payoff).
 
 ## 8. Roadmap (phases + gates)
 

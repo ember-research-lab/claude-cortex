@@ -2,7 +2,7 @@
 
 **Status:** proposal · 2026-06-07 · driven by the ember-smb-platform
 per-business-per-server deployment (one tenant's action-audit ledger growing under
-daily 9-5 use, replicated across ~100 boxes). Co-consumer: Whale Signal.
+daily 9-5 use, replicated across ~100 boxes). Co-consumer: another project.
 
 **TL;DR.** The action ledger holds the **entire chain in RAM** (`entries: Vec<SignedEntry>`,
 never shrinks) and **re-reads + re-verifies the whole journal on every restart**
@@ -52,7 +52,7 @@ frame+effect, SoR write) → **~200k entries/year** typical, **~500k–750k/year
 1. **RAM starvation** — the ledger Vec crowds everything else on the box.
 2. **OOM crash-loop** (the dangerous one) — a memory-pressured box restarts, `recover` does
    a multi-hundred-MB `read_to_string` + rebuilds the >1 GiB Vec, OOMs again → loop. Same
-   failure class as the `whale_signal.db` incidents.
+   failure class as another project's database incidents.
 
 > **Consumer amplification (SMB).** The SMB `adapter-ledger` keeps a *second* full `Vec` of
 > the chain (it converts every `cortex_audit::SignedEntry` into the platform's own type at
@@ -113,7 +113,7 @@ touch disk.
 - **Reads** are now `read_range(start_seq, limit)` / `recent(limit)` (owned, lazy: served from
   the window when in range, else paged from the journal) + `len()`. `entries()` still exists
   but returns the **resident window** (documented). The only direct consumer is the SMB
-  `adapter-ledger` — Whale Signal hasn't adopted cortex-audit yet, so this *sets* the contract.
+  `adapter-ledger` — another project hasn't adopted cortex-audit yet, so this *sets* the contract.
   The disk read path **verifies as it pages** (threads `prev` from genesis, runs the per-entry
   check on each streamed entry — no extra I/O, the scan already starts at seq 0), so a journal
   rewritten *after* recover can't hand a paging reader forged history; window reads are
@@ -195,7 +195,7 @@ shelf; revisit only if (a) restart latency on very large ledgers becomes a real 
 pain even parallelized, or (b) we need **archival** (L3), which segmentation naturally enables.
 If revisited, do it **opt-in** (default = full verify) so operators choose the posture.
 
-## 6. Open questions (cross-consumer — needs Whale Signal sign-off)
+## 6. Open questions (cross-consumer — needs the other consumer's sign-off)
 
 1. Segment boundary: entry-count vs time vs size? (Lean: count, e.g. 100k — predictable
    recover cost.)
@@ -205,7 +205,7 @@ If revisited, do it **opt-in** (default = full verify) so operators choose the p
 4. Manifest anchoring: is the local signed manifest enough, or do we want an external anchor
    (third-party root hash) for regulator-grade tamper-evidence from the start?
 5. Do L1's RAM bounds belong in cortex-audit (all consumers benefit) or as a consumer opt-in?
-   (Recommend: in cortex-audit — Whale Signal will hit the same wall.)
+   (Recommend: in cortex-audit — another project will hit the same wall.)
 
 ## 7. Reproduce the numbers
 

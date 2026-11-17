@@ -6,7 +6,7 @@ Orientation for anyone (human or Claude) working in this repo. Read this first; 
 
 **Persistent memory that makes Claude Code smarter across sessions.** cortex is a Claude Code *plugin* (an MCP server; paused since 0.6.0, no hooks/skills/agents) backed by a **Rust workspace**. Learnings are recorded in a blockchain-style **ledger**: hash-chained, Ed25519-signed blocks with a content-addressed object store and a Merkle root. Confidence updates on Success / Partial / Failure outcomes and decays on a 180-day half-life so stale guidance fades unless reinforced.
 
-This is the **v3+ Rust rewrite** (v2 was Python, still at `ember-lab-admin/claude-cortex` for legacy installs). The v4 layer adds spectral retrieval + handoff substrate, v5 adds episodic consolidation. **The on-disk substrate format is preserved from v2** — see "What not to touch."
+This is the **v3+ Rust rewrite** (v2 was Python). The v4 layer adds spectral retrieval + handoff substrate, v5 adds episodic consolidation. **The on-disk substrate format is preserved from v2** — see "What not to touch."
 
 **Read before substantial work:**
 - [`README.md`](README.md) — install/upgrade/migration flows, phase status, performance budgets.

@@ -95,7 +95,7 @@ mod tests {
             },
             LearningNode {
                 id: "c".into(),
-                content: "WAL bloat corrupts the whale signal sqlite database".into(),
+                content: "WAL bloat corrupts the orders sqlite database".into(),
                 category: "error".into(),
             },
         ]
@@ -115,7 +115,7 @@ mod tests {
         );
         // The unrelated WAL learning shares no terms and no edge — must be scoped out.
         assert!(
-            !out.contains("whale signal"),
+            !out.contains("orders sqlite"),
             "irrelevant learning leaked:\n{out}"
         );
     }

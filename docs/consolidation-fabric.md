@@ -2,7 +2,7 @@
 
 **Status:** design of record. The "why" behind cortex. Extends
 `vnext-substrate-spec.md` (which is the substrate); this is the *goal that
-substrate serves*. Scope: **org-wide** (all ember-research-lab + whale-signal),
+substrate serves*. Scope: **org-wide** (all ember-research-lab plus another project),
 with a **higher rigor bar** for research-adjacent work.
 
 ## The problem (stated by ember-lab-admin, 2026-07-09)
@@ -46,7 +46,7 @@ nothing links them.
   "monthly workflow"). claude.ai has **no live API** for your own history;
   share-links are Cloudflare-walled. So *real-time* seamless chat capture is
   platform-blocked. Mitigations: cron the index+consolidate (auto after export);
-  browser-automate the export (Playwright/chrome-devtools MCP); or ride the
+  or ride the
   existing ember-queue mobile→Drive pipeline.
 - **Local surfaces ARE fully auto-capturable now** — Claude Code sessions
   (cortex-episodic) and Grok sessions (local files, per-directory).
@@ -75,13 +75,13 @@ Everything already built is the **skeleton** of this fabric:
 - **bi-temporal edges (Phase 4)** = *needed here* for temporal/parallel coherence
   ("what was true when", supersede stale). Not premature — premature *as
   standalone*, correct *in service of consolidation*.
-- **progress-as-contestable-claims** and **whale-signal's lucky-seed** are the
+- **progress-as-contestable-claims** and **another project's lucky-seed** are the
   same problem (a claim not reconciled against evidence) — same fabric.
 
 ## The heart: the entity spine (the hard core)
 An LLM extractor (cheap lane — Grok/Haiku, on the cron) reads new content from
 each surface and emits `(entity, canonical_name, mention, evidence)`, resolving
-NL variants — "ascent A-signal" ≈ "whale signal ascent" ≈ the "HEAD-SEED-FRAGILE"
+NL variants — "ascent A-signal" ≈ "signal ascent" ≈ the "HEAD-SEED-FRAGILE"
 finding → **one** content-addressed node (`NodeId::canonical`). Each surface's
 contribution attaches to that node. **Entity resolution across NL surfaces is the
 genuinely hard part** — it is not deterministic; it is the extractor's judgment.
@@ -93,7 +93,7 @@ acceptance check — a measurement, a seed-sweep, a token delta — not "it
 compiled"), and it is **contestable** (a later Failure flips Validated→Contested
 and it stops being load-bearing). "Done" is *Validated-until-contested*, not a
 latch. This is the same cortex confidence mechanism, applied to progress. Higher
-bar for ember-research/whale-signal: their claims carry the seed-robust/DSR-PBO
+bar for ember-research and another project: their claims carry the seed-robust/DSR-PBO
 evidence discipline before they can be "verified".
 
 ## Build sequence
@@ -101,29 +101,28 @@ evidence discipline before they can be "verified".
    scope) — proven that Grok reads its 13 tools headless. Grok stops being
    thread-blind.
 1. **Entity spine:** extractor (cheap lane) → global graph entities; resolve NL
-   variants to one node. Prove on the whale-signal thread.
+   variants to one node. Prove on a single real thread.
 2. **Multi-surface ingest:** thread chat (from export) + Claude Code + Grok
    sessions onto entities. Cron the pass (auto after data lands).
 3. **Consolidated read:** "thread on X" from any repo → chat reasoning + ledger
    findings + code, together, contestable. The demo: from claude-cortex,
-   answer "what's the thread on whale-signal ascent" with cross-surface content
+   answer "what's the thread on the ascent signal" with cross-surface content
    not in this repo.
-4. **Chat-export automation** (parallel track, platform plumbing): browser-auto
-   or ember-queue, to reduce the one manual step.
+4. **Chat-export automation** (parallel track, platform plumbing): reduce the one manual step. Not shipped in this repo.
 5. **Later:** hosted endpoint (mobile agents); meta-orchestrator that steers the
    per-repo orchestrators (reads this brain, dispatches) — replacing the human
    router.
 
 ## Shipped (status 2026-07-11)
-Implemented in [`../scripts/`](../scripts/) (see `scripts/README.md` + `scripts/export-automation/SETUP.md`):
+Implemented in [`../scripts/`](../scripts/) (see `scripts/README.md`):
 - **Step 0 — cross-agent unlock:** DONE. `cortex-mcp` registered in Grok; Grok reads the brain headless.
 - **Step 2 — multi-surface ingest (chat):** DONE (safe form). The producer (`consolidate_run.py`) extracts → **independently provenance-verifies** → contradiction-gates → queues **review items**; a human drains (`cortex_review.py`). Key correction vs the original plan: full-autonomous *commit* is unsafe (contradiction detection is recall-limited), so the commit is human-in-loop while the tedium is automated. Runs on the Claude subscription.
-- **Step 4 — chat-export automation:** DONE + proven end-to-end. Standalone Playwright (headed to pass Cloudflare, cookie auth) requests + downloads the export; Gmail-IMAP retrieves the link; a new zip auto-indexes and triggers the producer.
+- **Step 4 — chat-export automation:** not shipped here; the export is downloaded manually.
 - **Still open:** Step 1 (entity spine — currently flat `[chat]` tags + topic-neighbor annotation, not yet a resolved-entity graph), Step 3 (consolidated cross-surface read), Step 5 (hosted endpoint / meta-orchestrator).
 
 ## Success test (falsifiable, not "it compiled")
-From a repo unrelated to whale-signal, ask an agent (Claude **or** Grok) "what's
-the thread on the whale-signal ascent signal?" and get: the chat-side reasoning
+From an unrelated repo, ask an agent (Claude **or** Grok) "what's
+the thread on the ascent signal?" and get: the chat-side reasoning
 (Sharadar/survivorship, actor-vs-momentum, spectral-GNN-vs-RDT) **plus** the
 code-side findings (HEAD-SEED-FRAGILE, the lucky-seed retraction) **plus** the
 current contestable status — consolidated, with zero re-explaining. Today that

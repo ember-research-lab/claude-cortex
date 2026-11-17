@@ -8,11 +8,7 @@ for the "why".
 ## Flow
 
 ```
-── upstream: chat-export automation (scripts/export-automation/, see SETUP.md) ──
-cortex-export-request.timer  (weekly)  ─► run-export.sh request ─► export-bot.js request   (headed Playwright, past Cloudflare)
-                                                  claude.ai processes ASYNC ─► emails the ready link
-cortex-export-retrieve.timer (every 4h)─► run-export.sh retrieve ─► retrieve.py (Gmail IMAP → URL) ─► export-bot.js download ─► ~/Downloads/data-*.zip
-                                                                                                              │
+── upstream: you download the claude.ai data export (manual) ──
 cortex-corpus-refresh.path (watch ~/Downloads) ─► refresh-corpus.sh ─► ember-chat-search index + semantic-index
                                                                                                               │  (fresh corpus)
 ── consolidation ─────────────────────────────────────────────────────────────── ▼
@@ -43,7 +39,6 @@ chat-consolidate.sh  ──►  consolidate_run.py "<scope>" --review
 | `cortex_client.py` | Reliable direct cortex-mcp stdio client — the write path. Sidesteps the headless plugin-MCP connection race; a fresh process connects in ~0.02s. |
 | `ledger_count.py` | Independent `total_learnings` count via the public MCP interface (format-stable). |
 | `refresh-corpus.sh` | Event-driven ingest tail: a new `~/Downloads/data-*.zip` → `ember-chat-search index` + `semantic-index` → trigger the consolidation producer. |
-| `export-automation/` | Fully-automatic claude.ai export **request + download** (standalone Playwright, headed to pass Cloudflare; cookie auth; IMAP retrieval). See [`export-automation/SETUP.md`](export-automation/SETUP.md) — setup + 9 verified gotchas. |
 
 ## Safety model
 
@@ -67,9 +62,5 @@ systemctl --user enable --now cortex-chat-consolidate.timer cortex-corpus-refres
 #   CORTEX_CONSOLIDATE_MODEL=sonnet     # driver model
 #   CORTEX_CONSOLIDATE_NTFY=<topic>     # push a summary on new review items / auth-expiry alerts
 ```
-
-For the upstream **chat-export automation** (auto request + download), follow
-[`export-automation/SETUP.md`](export-automation/SETUP.md) (cookie import, Gmail app-password,
-`cortex-export-*` timers).
 
 Drain whenever: `python3 scripts/cortex_review.py list`.

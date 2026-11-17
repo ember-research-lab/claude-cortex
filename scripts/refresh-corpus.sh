@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# refresh-corpus.sh — the deterministic tail of chat-export automation.
+# refresh-corpus.sh — ingest a new claude.ai export zip.
 #
 # newest claude.ai export zip in ~/Downloads  ->  ember-chat-search index (+ semantic)
 #   ->  trigger the consolidation producer (fills the review queue).
@@ -7,9 +7,8 @@
 # Idempotent (per-zip marker). Event-driven by cortex-corpus-refresh.path (watches
 # ~/Downloads), or manual: bash refresh-corpus.sh [/path/to/export.zip]
 #
-# This is the half that works WITHOUT browser auth: once a zip lands (you click the
-# "Download Data" email link, or the Playwright layer fetches it), everything
-# downstream is hands-off. Requesting+downloading the export is the auth-gated half.
+# Once a zip lands (you click the "Download Data" email link), everything
+# downstream is hands-off.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
