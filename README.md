@@ -32,7 +32,7 @@ cortex lives at `ember-research-lab/claude-cortex` (this repo). The earlier v2 (
 | 0.5.0 | v-next substrate: epistemic confidence (usage-driven, relax-to-prior), `recall_context`, `record_corroboration`, BM25 NL-search, `cortex-graph` | done |
 | 0.5.1 | Fix: cortex sub-agents received zero MCP tools (plugin-scoped tool-name grants) | done |
 | 0.6.0 | **Pause**: hooks, skills, agents removed; `cortex-mcp --read-only`; read-path fixes B1/B3/B4 | done |
-| fabric | Cross-surface consolidation (`scripts/`): producer → verify → contradiction-gate → review queue; chat-export automation | done |
+| fabric | Cross-surface consolidation (`scripts/`): producer → verify → contradiction-gate → review queue | done |
 
 **Performance (measured before the 0.6.0 pause; hooks are no longer wired):** hook cold start 3-5 ms (budget: 100 ms). MCP server startup-to-`tools/list` 10-14 ms (budget: 50 ms). cortex-dream pipeline under 60 s for ledgers <10 k entries.
 
@@ -70,11 +70,10 @@ claude-cortex/
 Beyond the per-session plugin, cortex includes a **cross-surface consolidation fabric** that keeps the ledger fresh from the claude.ai **chat corpus** — the largest, least-connected memory surface — without the human being the memory bus. It runs on the **Claude subscription** (not the metered API) and is designed for **safe autonomy**: a producer extracts and *independently* provenance-verifies candidates, then queues them; a human drains a **review queue** for the one recall-limited judgment call (is a new claim a genuine contradiction of an existing one?). Nothing is written to the ledger autonomously.
 
 ```
-chat export (auto: request → download)  →  index  →  producer (extract → verify → contradiction-gate)  →  review queue  →  you approve/reject  →  ledger
+chat export (manual download)  →  index  →  producer (extract → verify → contradiction-gate)  →  review queue  →  you approve/reject  →  ledger
 ```
 
 - **`scripts/`** — the consolidation pipeline (`consolidate_run.py`, `cortex_review.py`, `cortex_client.py`, …) and systemd timers. See [`scripts/README.md`](scripts/README.md).
-- **`scripts/export-automation/`** — fully-automatic claude.ai data-export request + download (standalone Playwright, headed to pass Cloudflare, cookie auth, IMAP retrieval). See [`scripts/export-automation/SETUP.md`](scripts/export-automation/SETUP.md).
 - **[`docs/consolidation-fabric.md`](docs/consolidation-fabric.md)** — the design of record (the "why").
 
 ## Local development

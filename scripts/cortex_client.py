@@ -8,7 +8,7 @@ a subagent's not-yet-connected plugin tools.
 
 Importable (cortex_session context manager) and CLI:
     python3 cortex_client.py ledger_stats
-    python3 cortex_client.py search_learnings '{"query":"whale-signal","limit":2}'
+    python3 cortex_client.py search_learnings '{"query":"ledger","limit":2}'
     python3 cortex_client.py tag_learning '{"content":"...","category":"pattern","confidence":0.6}'
 """
 import json
