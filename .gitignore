@@ -16,3 +16,7 @@ Cargo.lock.bak
 # Per-session mining drafts (content gets promoted to the ledger; the
 # files themselves are scratch and shouldn't track between machines).
 .cortex-candidates/
+
+# Python bytecode
+__pycache__/
+*.pyc
